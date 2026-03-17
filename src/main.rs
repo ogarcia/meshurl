@@ -237,7 +237,7 @@ fn create_lora_config(args: &LoRaArgs) -> LoRaInfo {
         region: args
             .region
             .map(|r| r.to_region_code())
-            .unwrap_or(unsafe { std::mem::transmute(0i32) }),
+            .unwrap_or(meshtastic_protobufs::meshtastic::config::lo_ra_config::RegionCode::Eu868),
         modem_preset: modem_preset.unwrap_or(
             meshtastic_protobufs::meshtastic::config::lo_ra_config::ModemPreset::LongFast,
         ),

@@ -18,7 +18,7 @@ A [Meshtastic][meshtastic] channel configuration URL encoder and decoder written
 
 Download the latest release from the [releases page][releases].
 
-[releases]: https://github.com/ogarcia/meshchan/releases
+[releases]: https://github.com/ogarcia/meshurl/releases
 
 ### From source
 
