@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - '*'
+    tags:
+      - '*'
+  workflow_dispatch:
+
+jobs:
+  build-binaries:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            os_name: linux
+            arch: amd64
+            name: meshurl-linux-amd64.tar.gz
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            os_name: linux
+            arch: arm64
+            name: meshurl-linux-arm64.tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            os_name: darwin
+            arch: arm64
+            name: meshurl-darwin-arm64.tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            os_name: windows
+            arch: amd64
+            name: meshurl-windows-amd64.zip
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: cargo install cross
+
+      - name: Build with cross
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: |
+          cross build --release --target aarch64-unknown-linux-musl
+          mkdir -p release
+          cp target/aarch64-unknown-linux-musl/release/meshurl release/meshurl
+        shell: bash
+
+      - name: Build
+        if: matrix.target != 'aarch64-unknown-linux-musl'
+        run: |
+          cargo build --release --target ${{ matrix.target }}
+          mkdir -p release
+          if [ "${{ matrix.os_name }}" = "windows" ]; then
+            cp target/${{ matrix.target }}/release/meshurl.exe release/meshurl.exe
+          else
+            cp target/${{ matrix.target }}/release/meshurl release/meshurl
+          fi
+        shell: bash
+
+      - name: Create release archive
+        run: |
+          cd release
+          if [ "${{ matrix.os_name }}" = "windows" ]; then
+            cp ../README.md .
+            cp ../LICENSE .
+            powershell -Command "Compress-Archive -Path * -DestinationPath ../${{ matrix.name }}"
+          else
+            cp ../README.md .
+            cp ../LICENSE .
+            tar -czvf ../${{ matrix.name }} *
+          fi
+        shell: bash
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+
+  create-release:
+    needs: build-binaries
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,31 @@
+[package]
+name = "meshurl"
+version = "0.1.0"
+edition = "2024"
+description = "Meshtastic URL encoder and decoder"
+license = "GPL-3.0-or-later"
+authors = ["Óscar García Amor <ogarcia@connectical.com>"]
+readme = "README.md"
+repository = "https://github.com/ogarcia/meshurl"
+keywords = ["meshtastic", "decoder", "encoder", "radio", "lora", "cli", "tui"]
+categories = ["encoding", "decoder", "command-line-utilities"]
+
+[[bin]]
+name = "meshurl"
+path = "src/main.rs"
+
+[lib]
+name = "meshurl"
+path = "src/lib/mod.rs"
+
+[dependencies]
+meshtastic_protobufs = "2.7"
+base64 = "0.22"
+clap = { version = "4.5", features = ["derive"] }
+prost = "0.13"
+colored = "2.1"
+bytes = "1"
+sha2 = "0.10"
+ratatui = "0.30"
+ratatui-textarea = "0.8"
+crossterm = "0.28"
