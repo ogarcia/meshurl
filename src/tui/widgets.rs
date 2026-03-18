@@ -13,6 +13,82 @@ pub fn yes_no(value: bool) -> &'static str {
     }
 }
 
+pub fn channel_total_lines(channels: &[ChannelInfo]) -> usize {
+    channels
+        .iter()
+        .map(|ch| {
+            let base_lines = 4;
+            let has_position =
+                ch.position_precision.is_some() && ch.position_precision.unwrap() > 0;
+            base_lines + if has_position { 1 } else { 0 }
+        })
+        .sum()
+}
+
+pub fn channel_scroll_indicator(
+    total_lines: usize,
+    block_height: u16,
+    selected_idx: usize,
+    has_scroll_state: bool,
+    scroll_offset: usize,
+) -> &'static str {
+    let visible_lines = block_height.saturating_sub(4) as usize;
+
+    if total_lines <= visible_lines {
+        return "";
+    }
+
+    if has_scroll_state {
+        if scroll_offset == 0 {
+            " [ ↓ more ] "
+        } else if scroll_offset >= total_lines.saturating_sub(visible_lines) {
+            " [ ↑ more ] "
+        } else {
+            " [ ↕ more ] "
+        }
+    } else {
+        if selected_idx == 0 {
+            " [ ↓ more ] "
+        } else {
+            " [ ↑ more ] "
+        }
+    }
+}
+
+pub struct ScrollInfo {
+    pub visible_lines: usize,
+    pub max_scroll: u16,
+    pub clamped_scroll: u16,
+    pub indicator: &'static str,
+}
+
+pub fn lora_scroll_info(lora: &LoRaInfo, block_height: u16, scroll_offset: u16) -> ScrollInfo {
+    let all_lines = lora_info_lines(lora);
+    let total_lora_lines = all_lines.len();
+    let visible_lora_lines = (block_height.saturating_sub(4)) as usize;
+    let max_scroll = total_lora_lines.saturating_sub(visible_lora_lines) as u16;
+    let clamped_scroll = scroll_offset.min(max_scroll);
+
+    let indicator = if total_lora_lines > visible_lora_lines {
+        if clamped_scroll == 0 {
+            " [ ↓ more ] "
+        } else if clamped_scroll >= max_scroll {
+            " [ ↑ more ] "
+        } else {
+            " [ ↕ more ] "
+        }
+    } else {
+        ""
+    };
+
+    ScrollInfo {
+        visible_lines: visible_lora_lines,
+        max_scroll,
+        clamped_scroll,
+        indicator,
+    }
+}
+
 pub fn lora_info_lines(lora: &LoRaInfo) -> Vec<Line<'_>> {
     let region_color = Color::Cyan;
     let preset_color = Color::Yellow;

@@ -15,7 +15,10 @@ use ratatui_textarea::{CursorMove, TextArea};
 use std::io::Write;
 
 use crate::tui::app::ActivePanel;
-use crate::tui::widgets::{channel_list_item, lora_info_lines};
+use crate::tui::widgets::{
+    channel_list_item, channel_scroll_indicator, channel_total_lines, lora_info_lines,
+    lora_scroll_info,
+};
 
 pub struct ChannelPopupState {
     pub channel_index: Option<usize>,
@@ -342,24 +345,17 @@ pub fn draw_encode_mode(
 
     let channels_title = format!(" 📋 Channels ({} found) ", encode_config.channels.len());
 
-    let total_channels = encode_config.channels.len();
-    let channels_block_height = chunks[1].height as usize;
-    let total_lines = total_channels * 4;
-    let visible_lines = channels_block_height.saturating_sub(2);
-
+    let total_lines = channel_total_lines(&encode_config.channels);
+    let block_height = chunks[1].height;
     let selected_idx = encode_channels_state.selected().unwrap_or(0);
 
-    let channels_scroll_indicator = if total_lines > visible_lines {
-        if selected_idx == 0 {
-            " [ ↓ more ] "
-        } else if selected_idx >= total_channels.saturating_sub(1) {
-            " [ ↑ more ] "
-        } else {
-            " [ ↕ more ] "
-        }
-    } else {
-        ""
-    };
+    let channels_scroll_indicator = channel_scroll_indicator(
+        total_lines,
+        block_height,
+        selected_idx,
+        false, // no scroll state in encode, use selected_idx
+        0,
+    );
 
     let channels_block = Block::default()
         .title(channels_title)
@@ -396,27 +392,24 @@ pub fn draw_encode_mode(
     let lora_title = " 📻 LoRa Config ";
 
     if let Some(lora) = &encode_config.lora {
-        let visible_lora_lines = (chunks[2].height.saturating_sub(4)) as usize;
-        let total_lora_lines: usize = 17;
+        let scroll_info = lora_scroll_info(lora, chunks[2].height, lora_scroll);
+        *lora_max_scroll = scroll_info.max_scroll;
 
-        *lora_max_scroll = total_lora_lines.saturating_sub(visible_lora_lines) as u16;
-        let clamped_scroll = (lora_scroll as usize).min(*lora_max_scroll as usize) as u16;
+        let all_lines = lora_info_lines(lora);
 
-        let lora_scroll_indicator = if total_lora_lines > visible_lora_lines {
-            if clamped_scroll == 0 {
-                " [ ↓ more ] "
-            } else if clamped_scroll >= *lora_max_scroll {
-                " [ ↑ more ] "
-            } else {
-                " [ ↕ more ] "
-            }
+        let lines: Vec<Line> = if scroll_info.max_scroll > 0 {
+            all_lines
+                .into_iter()
+                .skip(scroll_info.clamped_scroll as usize)
+                .take(scroll_info.visible_lines)
+                .collect()
         } else {
-            ""
+            all_lines
         };
 
         let lora_block = Block::default()
             .title(lora_title)
-            .title_bottom(Line::from(lora_scroll_indicator).right_aligned())
+            .title_bottom(Line::from(scroll_info.indicator).right_aligned())
             .borders(Borders::ALL)
             .padding(Padding::new(1, 1, 1, 1))
             .border_style(if active_panel == ActivePanel::Lora {
@@ -425,17 +418,6 @@ pub fn draw_encode_mode(
                 Style::default().fg(Color::DarkGray)
             });
 
-        let all_lines = lora_info_lines(lora);
-
-        let lines: Vec<Line> = if total_lora_lines > visible_lora_lines {
-            all_lines
-                .into_iter()
-                .skip(clamped_scroll as usize)
-                .take(visible_lora_lines)
-                .collect()
-        } else {
-            all_lines
-        };
         let lora_para = Paragraph::new(lines).block(lora_block);
         f.render_widget(lora_para, chunks[2]);
     } else {
