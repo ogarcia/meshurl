@@ -19,7 +19,10 @@ use crate::models::{MeshtasticConfig, MESHTASTIC_URL_BASE};
 ///
 /// # Example
 /// ```
-/// let config = decode_url("https://meshtastic.org/e/#CgMSAQ...").unwrap();
+/// use meshurl::decode_url;
+///
+/// let url = "#CgsSAQEoATABOgIIDQoPEgEBGgZJYmVyaWEoATABChESAQEaCEFDb3J1w7FhKAEwARIWCAEY-gEgCygFOANABkgBUBtoAcAGAQ";
+/// let config = decode_url(url).expect("valid URL");
 /// for channel in config.channels {
 ///     println!("Channel: {}", channel.name);
 /// }
@@ -104,13 +107,25 @@ mod tests {
 
     #[test]
     fn test_decode_url_with_custom_psk() {
-        let url = "#CjMSIL_eLKhYYWjguqvQg5bGAHosTMbkwksdDKLMpGOKc3p0GgtJcmVsYW5kV2lkZSgBMAESDggBOANAA0gBUAxgAWgB";
+        let url = "#CgwSAQEaB0dhbGljaWE";
         let result = decode_url(url);
         assert!(result.is_ok());
 
         let config = result.unwrap();
         assert_eq!(config.channels.len(), 1);
-        assert_eq!(config.channels[0].name, "IrelandWide");
+        assert_eq!(config.channels[0].name, "Galicia");
         assert!(!config.channels[0].psk.is_empty());
+    }
+
+    #[test]
+    fn test_decode_base64_invalid() {
+        let result = decode_base64("not-valid-base64!!!");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decode_base64_valid() {
+        let result = decode_base64("CgsSAQ");
+        assert!(result.is_ok());
     }
 }

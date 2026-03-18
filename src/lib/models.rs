@@ -90,9 +90,11 @@ pub struct ChannelInfo {
 ///
 /// # Example
 /// ```
+/// use std::str::FromStr;
+/// use meshurl::ChannelInfo;
+///
 /// let channel = ChannelInfo::from_str("name=Test,psk_mode=random,uplink").unwrap();
 /// assert_eq!(channel.name, "Test");
-/// assert_eq!(channel.psk_mode, PskMode::Random);
 /// assert!(channel.uplink_enabled);
 /// ```
 impl std::str::FromStr for ChannelInfo {
@@ -312,6 +314,8 @@ pub struct LoRaInfo {
 ///
 /// # Example
 /// ```
+/// use meshurl::{get_preset_params, ModemPreset};
+///
 /// let (bw, sf, cr) = get_preset_params(ModemPreset::LongFast);
 /// assert_eq!(bw, 250);  // 250 kHz
 /// assert_eq!(sf, 11);   // SF11

@@ -203,4 +203,29 @@ mod tests {
         assert_eq!(decoded.channels.len(), 1);
         assert_eq!(decoded.channels[0].name, "TestChannel");
     }
+
+    #[test]
+    fn test_region_code_from_str() {
+        use meshtastic_protobufs::meshtastic::config::lo_ra_config::RegionCode;
+
+        assert_eq!(region_code_from_str("US"), RegionCode::Us);
+        assert_eq!(region_code_from_str("EU868"), RegionCode::Eu868);
+        assert_eq!(region_code_from_str("CN"), RegionCode::Cn);
+        assert_eq!(region_code_from_str("JP"), RegionCode::Jp);
+        assert_eq!(region_code_from_str("unknown"), RegionCode::Eu868);
+    }
+
+    #[test]
+    fn test_modem_preset_from_str() {
+        use meshtastic_protobufs::meshtastic::config::lo_ra_config::ModemPreset;
+
+        assert_eq!(modem_preset_from_str("LongFast"), ModemPreset::LongFast);
+        assert_eq!(modem_preset_from_str("LongSlow"), ModemPreset::LongSlow);
+        assert_eq!(
+            modem_preset_from_str("VeryLongSlow"),
+            ModemPreset::VeryLongSlow
+        );
+        assert_eq!(modem_preset_from_str("ShortTurbo"), ModemPreset::ShortTurbo);
+        assert_eq!(modem_preset_from_str("unknown"), ModemPreset::LongFast);
+    }
 }

@@ -8,7 +8,8 @@
 //! use meshurl::{decode_url, encode_url};
 //!
 //! // Decode a URL
-//! let config = decode_url("https://meshtastic.org/e/#CgMSAQ...").unwrap();
+//! let url = "#CgsSAQEoATABOgIIDQoPEgEBGgZJYmVyaWEoATABChESAQEaCEFDb3J1w7FhKAEwARIWCAEY-gEgCygFOANABkgBUBtoAcAGAQ";
+//! let config = decode_url(url).expect("valid URL");
 //! for channel in config.channels {
 //!     println!("Channel: {}", channel.name);
 //! }
