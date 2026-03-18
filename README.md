@@ -35,8 +35,8 @@ rustup default stable
 #### Building MeshURL
 
 ```shell
-git clone https://github.com/ogarcia/meshchan.git
-cd meshchan/meshurl
+git clone https://github.com/ogarcia/meshurl.git
+cd meshurl
 cargo build --release
 ```
 
@@ -92,6 +92,8 @@ meshurl
 | `E` | Edit LoRa configuration |
 | `G` | Generate URL |
 | `C` | Copy URL to clipboard |
+| `M` | Migrate decoded URL to Encode mode |
+| `+` / `-` | Reorder channels up/down |
 | `Del` | Clear all configuration |
 
 ## Library
