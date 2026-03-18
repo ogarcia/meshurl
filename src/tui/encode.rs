@@ -430,8 +430,11 @@ pub fn draw_encode_mode(
     } else {
         ""
     };
+
+    let can_reorder = encode_config.channels.len() >= 2;
+    let reorder_hint = if can_reorder { " [+]/[-] Move" } else { "" };
     let footer_text = match active_panel {
-        ActivePanel::Channels => format!("[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [D] Delete  [E] LoRa  [G] Generate{}  [Del] Clear", copy_hint),
+        ActivePanel::Channels => format!("[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [D] Delete{}  [E] LoRa  [G] Generate{}  [Del] Clear", reorder_hint, copy_hint),
         ActivePanel::Lora => format!("[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [E] LoRa  [G] Generate{}  [Del] Clear", copy_hint),
         ActivePanel::UrlEncode => format!("[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [E] LoRa  [G] Generate{}  [Del] Clear", copy_hint),
         ActivePanel::Url => format!("[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [E] LoRa  [G] Generate{}  [Del] Clear", copy_hint),
@@ -557,6 +560,38 @@ pub fn handle_encode_keys(
                 }
             }
             true
+        }
+        KeyCode::Char('+') => {
+            if let Some(idx) = encode_channels_state.selected() {
+                if idx < encode_config.channels.len() - 1 {
+                    encode_config.channels.swap(idx, idx + 1);
+                    for (i, ch) in encode_config.channels.iter_mut().enumerate() {
+                        ch.role = if i == 0 {
+                            ChannelRole::Primary
+                        } else {
+                            ChannelRole::Secondary
+                        };
+                    }
+                    encode_channels_state.select(Some(idx + 1));
+                }
+            }
+            false
+        }
+        KeyCode::Char('-') => {
+            if let Some(idx) = encode_channels_state.selected() {
+                if idx > 0 {
+                    encode_config.channels.swap(idx, idx - 1);
+                    for (i, ch) in encode_config.channels.iter_mut().enumerate() {
+                        ch.role = if i == 0 {
+                            ChannelRole::Primary
+                        } else {
+                            ChannelRole::Secondary
+                        };
+                    }
+                    encode_channels_state.select(Some(idx - 1));
+                }
+            }
+            false
         }
         KeyCode::Char('d') | KeyCode::Char('D') => {
             if let Some(selected) = encode_channels_state.selected() {
