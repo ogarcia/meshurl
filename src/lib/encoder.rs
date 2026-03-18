@@ -6,7 +6,7 @@ use meshtastic_protobufs::meshtastic::ChannelSet;
 use prost::Message;
 
 use crate::errors::EncodeError;
-use crate::models::MeshtasticConfig;
+use crate::models::{MeshtasticConfig, MESHTASTIC_URL_BASE};
 
 /// Encodes a MeshtasticConfig into a full URL.
 ///
@@ -20,7 +20,7 @@ pub fn encode_url(config: &MeshtasticConfig) -> Result<String, EncodeError> {
     let channel_set = create_channel_set(config)?;
     let encoded = encode_protobuf(&channel_set)?;
     let base64 = encode_base64(&encoded)?;
-    Ok(format!("https://meshtastic.org/e/#{}", base64))
+    Ok(format!("{}{}", MESHTASTIC_URL_BASE, base64))
 }
 
 /// Encodes a MeshtasticConfig into a short URL (just the hash part).

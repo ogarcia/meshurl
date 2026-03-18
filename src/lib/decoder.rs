@@ -6,7 +6,7 @@ use meshtastic_protobufs::meshtastic::ChannelSet;
 use prost::Message;
 
 use crate::errors::DecodeError;
-use crate::models::MeshtasticConfig;
+use crate::models::{MeshtasticConfig, MESHTASTIC_URL_BASE};
 
 /// Decodes a Meshtastic URL into a MeshtasticConfig.
 ///
@@ -37,13 +37,11 @@ pub fn decode_url(url: &str) -> Result<MeshtasticConfig, DecodeError> {
 /// - meshtastic.org/e/#<hash>
 /// - #<hash>
 fn extract_hash(url: &str) -> Result<&str, DecodeError> {
-    url.strip_prefix("https://meshtastic.org/e/#")
+    url.strip_prefix(MESHTASTIC_URL_BASE)
         .or_else(|| url.strip_prefix("meshtastic.org/e/#"))
         .or_else(|| url.strip_prefix("#"))
         .ok_or_else(|| {
-            DecodeError::InvalidUrl(
-                "Expected format: https://meshtastic.org/e/#<base64>".to_string(),
-            )
+            DecodeError::InvalidUrl(format!("Expected format: {}<base64>", MESHTASTIC_URL_BASE))
         })
 }
 

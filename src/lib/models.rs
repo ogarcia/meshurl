@@ -28,6 +28,9 @@ pub const POSITION_OPTIONS: &[(&str, u32)] = &[
 /// Default PSK value (base64 encoded single byte [1]).
 pub const DEFAULT_PSK: &str = "AQ==";
 
+/// Base URL for Meshtastic channel configuration.
+pub const MESHTASTIC_URL_BASE: &str = "https://meshtastic.org/e/#";
+
 /// PSK (Pre-Shared Key) mode for channel encryption.
 /// - Default: uses the default (weak, public) key
 /// - None: no encryption
