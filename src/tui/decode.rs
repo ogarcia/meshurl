@@ -234,19 +234,31 @@ pub fn draw_decode_mode(
         }
     }
 
+    let has_valid_config = matches!(config_result, Some(Ok(_)));
+
     let footer_text = match active_panel {
         ActivePanel::Url => {
             if editing_url {
                 "[1] Decode  [2] Encode  [Enter] Decode  [Esc] Exit edit"
+            } else if has_valid_config {
+                "[1] Decode  [2] Encode  [M] Modify  [Enter] Edit  [Del] Clear  [Esc] Quit"
             } else {
                 "[1] Decode  [2] Encode  [Enter] Edit  [Del] Clear  [Esc] Quit"
             }
         }
         ActivePanel::Channels => {
-            "[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [↑↓] Scroll  [Del] Clear  [Esc] Quit"
+            if has_valid_config {
+                "[1] Decode  [2] Encode  [M] Modify  [Tab/Shift+Tab] Switch  [↑↓] Scroll  [Del] Clear  [Esc] Quit"
+            } else {
+                "[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [↑↓] Scroll  [Del] Clear  [Esc] Quit"
+            }
         }
         ActivePanel::Lora => {
-            "[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [↑↓] Scroll  [Del] Clear  [Esc] Quit"
+            if has_valid_config {
+                "[1] Decode  [2] Encode  [M] Modify  [Tab/Shift+Tab] Switch  [↑↓] Scroll  [Del] Clear  [Esc] Quit"
+            } else {
+                "[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [↑↓] Scroll  [Del] Clear  [Esc] Quit"
+            }
         }
         ActivePanel::UrlEncode => {
             "[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [G] Generate  [C] Copy  [Del] Clear"

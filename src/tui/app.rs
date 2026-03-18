@@ -124,6 +124,16 @@ fn run_inner(
                                     state.app_mode = AppMode::Encode;
                                     state.active_panel = ActivePanel::Channels;
                                 }
+                                KeyCode::Char('m') | KeyCode::Char('M') => {
+                                    if state.app_mode == AppMode::Decode {
+                                        if let Some(Ok(config)) = &state.config_result.clone() {
+                                            state.encode_config = config.clone();
+                                            state.app_mode = AppMode::Encode;
+                                            state.active_panel = ActivePanel::Channels;
+                                            state.encode_channels_state.select(Some(0));
+                                        }
+                                    }
+                                }
                                 KeyCode::Tab | KeyCode::BackTab => {
                                     if state.app_mode == AppMode::Encode {
                                         crate::tui::encode::handle_encode_tab(
