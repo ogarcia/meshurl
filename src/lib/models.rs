@@ -25,6 +25,9 @@ pub const POSITION_OPTIONS: &[(&str, u32)] = &[
     ("Precise", 32),
 ];
 
+/// Default PSK value (base64 encoded single byte [1]).
+pub const DEFAULT_PSK: &str = "AQ==";
+
 /// PSK (Pre-Shared Key) mode for channel encryption.
 /// - Default: uses the default (weak, public) key
 /// - None: no encryption
@@ -132,9 +135,9 @@ impl std::str::FromStr for ChannelInfo {
         }
 
         let (name, psk) = if is_default {
-            (String::new(), "AQ==".to_string())
+            (String::new(), DEFAULT_PSK.to_string())
         } else if name.is_none() && psk.is_none() && psk_mode.is_none() && psk_phrase.is_none() {
-            (String::new(), "AQ==".to_string())
+            (String::new(), DEFAULT_PSK.to_string())
         } else {
             let final_name = name.unwrap_or_default();
             let final_psk = if let Some(p) = psk {
@@ -153,7 +156,7 @@ impl std::str::FromStr for ChannelInfo {
                 STANDARD.encode(result.as_slice())
             } else {
                 match psk_mode.unwrap_or(PskMode::Default) {
-                    PskMode::Default => "AQ==".to_string(),
+                    PskMode::Default => DEFAULT_PSK.to_string(),
                     PskMode::None => String::new(),
                     PskMode::Random => {
                         use std::time::{SystemTime, UNIX_EPOCH};
@@ -176,7 +179,7 @@ impl std::str::FromStr for ChannelInfo {
 
         let psk_type = if psk.is_empty() {
             PskType::None
-        } else if psk == "AQ==" {
+        } else if psk == DEFAULT_PSK {
             PskType::Default
         } else {
             match STANDARD.decode(&psk) {

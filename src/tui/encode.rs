@@ -2,7 +2,7 @@ use base64::Engine;
 use meshurl::encoder::{encode_url, modem_preset_from_str, region_code_from_str};
 use meshurl::models::{
     get_preset_params, ChannelInfo, ChannelRole, LoRaInfo, MeshtasticConfig, PskMode, PskType,
-    POSITION_OPTIONS,
+    DEFAULT_PSK, POSITION_OPTIONS,
 };
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
@@ -180,7 +180,7 @@ impl ChannelPopupState {
     pub fn from_channel(index: usize, channel: &ChannelInfo) -> Self {
         let psk_mode = if channel.psk.is_empty() {
             PskMode::None
-        } else if channel.psk == "AQ==" {
+        } else if channel.psk == DEFAULT_PSK {
             PskMode::Default
         } else {
             PskMode::Random
@@ -234,7 +234,7 @@ impl ChannelPopupState {
         let index = self.channel_index.unwrap_or(default_index);
 
         let (psk, psk_type) = match self.psk_mode {
-            PskMode::Default => ("AQ==".to_string(), PskType::Default),
+            PskMode::Default => (DEFAULT_PSK.to_string(), PskType::Default),
             PskMode::None => (String::new(), PskType::None),
             PskMode::Random => {
                 let seed = SystemTime::now()
