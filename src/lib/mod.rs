@@ -23,7 +23,10 @@ pub mod errors;
 pub mod models;
 
 pub use decoder::decode_url;
-pub use encoder::{encode_url, encode_url_short};
+pub use encoder::{
+    encode_url, encode_url_short, modem_preset_from_str, region_code_from_str, ModemPreset,
+    RegionCode,
+};
 pub use errors::{DecodeError, EncodeError};
 pub use models::{
     get_preset_params, ChannelInfo, ChannelRole, LoRaInfo, MeshtasticConfig, PskMode, PskType,

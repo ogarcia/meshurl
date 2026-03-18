@@ -38,6 +38,47 @@ pub fn encode_url_short(config: &MeshtasticConfig) -> Result<String, EncodeError
     Ok(format!("#{}", base64))
 }
 
+pub use meshtastic_protobufs::meshtastic::config::lo_ra_config::ModemPreset;
+pub use meshtastic_protobufs::meshtastic::config::lo_ra_config::RegionCode;
+
+/// Converts a string region name to RegionCode.
+pub fn region_code_from_str(s: &str) -> RegionCode {
+    match s {
+        "US" => RegionCode::Us,
+        "EU433" => RegionCode::Eu433,
+        "EU868" => RegionCode::Eu868,
+        "CN" => RegionCode::Cn,
+        "JP" => RegionCode::Jp,
+        "ANZ" => RegionCode::Anz,
+        "KR" => RegionCode::Kr,
+        "TW" => RegionCode::Tw,
+        "RU" => RegionCode::Ru,
+        "IN" => RegionCode::In,
+        "NZ865" => RegionCode::Nz865,
+        "TH" => RegionCode::Th,
+        "Lora24" => RegionCode::Lora24,
+        "UA433" => RegionCode::Ua433,
+        "UA868" => RegionCode::Ua868,
+        _ => RegionCode::Eu868,
+    }
+}
+
+/// Converts a string modem preset name to ModemPreset.
+pub fn modem_preset_from_str(s: &str) -> ModemPreset {
+    match s {
+        "LongFast" => ModemPreset::LongFast,
+        "LongSlow" => ModemPreset::LongSlow,
+        "VeryLongSlow" => ModemPreset::VeryLongSlow,
+        "MediumSlow" => ModemPreset::MediumSlow,
+        "MediumFast" => ModemPreset::MediumFast,
+        "ShortSlow" => ModemPreset::ShortSlow,
+        "ShortFast" => ModemPreset::ShortFast,
+        "LongModerate" => ModemPreset::LongModerate,
+        "ShortTurbo" => ModemPreset::ShortTurbo,
+        _ => ModemPreset::LongFast,
+    }
+}
+
 /// Creates a protobuf ChannelSet from a MeshtasticConfig.
 fn create_channel_set(config: &MeshtasticConfig) -> Result<ChannelSet, EncodeError> {
     let settings: Vec<meshtastic_protobufs::meshtastic::ChannelSettings> =

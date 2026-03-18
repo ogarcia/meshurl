@@ -93,24 +93,23 @@ enum Region {
 }
 
 impl Region {
-    fn to_region_code(&self) -> meshtastic_protobufs::meshtastic::config::lo_ra_config::RegionCode {
-        use meshtastic_protobufs::meshtastic::config::lo_ra_config::RegionCode;
+    fn to_value(&self) -> &'static str {
         match self {
-            Region::Us => RegionCode::Us,
-            Region::Eu433 => RegionCode::Eu433,
-            Region::Eu868 => RegionCode::Eu868,
-            Region::Cn => RegionCode::Cn,
-            Region::Jp => RegionCode::Jp,
-            Region::Anz => RegionCode::Anz,
-            Region::Kr => RegionCode::Kr,
-            Region::Tw => RegionCode::Tw,
-            Region::Ru => RegionCode::Ru,
-            Region::In => RegionCode::In,
-            Region::Nz865 => RegionCode::Nz865,
-            Region::Th => RegionCode::Th,
-            Region::Lora24 => RegionCode::Lora24,
-            Region::Ua433 => RegionCode::Ua433,
-            Region::Ua868 => RegionCode::Ua868,
+            Region::Us => "US",
+            Region::Eu433 => "EU433",
+            Region::Eu868 => "EU868",
+            Region::Cn => "CN",
+            Region::Jp => "JP",
+            Region::Anz => "ANZ",
+            Region::Kr => "KR",
+            Region::Tw => "TW",
+            Region::Ru => "RU",
+            Region::In => "IN",
+            Region::Nz865 => "NZ865",
+            Region::Th => "TH",
+            Region::Lora24 => "Lora24",
+            Region::Ua433 => "UA433",
+            Region::Ua868 => "UA868",
         }
     }
 }
@@ -129,20 +128,17 @@ enum ModemPresetArg {
 }
 
 impl ModemPresetArg {
-    fn to_modem_preset(
-        &self,
-    ) -> meshtastic_protobufs::meshtastic::config::lo_ra_config::ModemPreset {
-        use meshtastic_protobufs::meshtastic::config::lo_ra_config::ModemPreset;
+    fn to_value(&self) -> &'static str {
         match self {
-            ModemPresetArg::LongFast => ModemPreset::LongFast,
-            ModemPresetArg::LongSlow => ModemPreset::LongSlow,
-            ModemPresetArg::VeryLongSlow => ModemPreset::VeryLongSlow,
-            ModemPresetArg::MediumSlow => ModemPreset::MediumSlow,
-            ModemPresetArg::MediumFast => ModemPreset::MediumFast,
-            ModemPresetArg::ShortSlow => ModemPreset::ShortSlow,
-            ModemPresetArg::ShortFast => ModemPreset::ShortFast,
-            ModemPresetArg::LongModerate => ModemPreset::LongModerate,
-            ModemPresetArg::ShortTurbo => ModemPreset::ShortTurbo,
+            ModemPresetArg::LongFast => "LongFast",
+            ModemPresetArg::LongSlow => "LongSlow",
+            ModemPresetArg::VeryLongSlow => "VeryLongSlow",
+            ModemPresetArg::MediumSlow => "MediumSlow",
+            ModemPresetArg::MediumFast => "MediumFast",
+            ModemPresetArg::ShortSlow => "ShortSlow",
+            ModemPresetArg::ShortFast => "ShortFast",
+            ModemPresetArg::LongModerate => "LongModerate",
+            ModemPresetArg::ShortTurbo => "ShortTurbo",
         }
     }
 }
@@ -221,13 +217,15 @@ fn encode_config(args: &EncodeArgs) -> Result<(MeshtasticConfig, String, String)
 }
 
 fn create_lora_config(args: &LoRaArgs) -> LoRaInfo {
+    use meshurl::{modem_preset_from_str, region_code_from_str, ModemPreset, RegionCode};
+
     let has_preset = args.region.is_some() || args.modem_preset.is_some();
-    let modem_preset = args.modem_preset.map(|m| m.to_modem_preset());
+    let modem_preset = args
+        .modem_preset
+        .map(|m| modem_preset_from_str(m.to_value()));
 
     let (bandwidth, spread_factor, coding_rate) = if has_preset {
-        let preset = modem_preset.unwrap_or(
-            meshtastic_protobufs::meshtastic::config::lo_ra_config::ModemPreset::LongFast,
-        );
+        let preset = modem_preset.unwrap_or(ModemPreset::LongFast);
         get_preset_params(preset)
     } else {
         (0, 0, 0)
@@ -236,11 +234,9 @@ fn create_lora_config(args: &LoRaArgs) -> LoRaInfo {
     LoRaInfo {
         region: args
             .region
-            .map(|r| r.to_region_code())
-            .unwrap_or(meshtastic_protobufs::meshtastic::config::lo_ra_config::RegionCode::Eu868),
-        modem_preset: modem_preset.unwrap_or(
-            meshtastic_protobufs::meshtastic::config::lo_ra_config::ModemPreset::LongFast,
-        ),
+            .map(|r| region_code_from_str(r.to_value()))
+            .unwrap_or(RegionCode::Eu868),
+        modem_preset: modem_preset.unwrap_or(ModemPreset::LongFast),
         use_preset: has_preset,
         tx_enabled: true,
         tx_power: args.tx_power.unwrap_or(0),

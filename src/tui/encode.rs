@@ -1,5 +1,5 @@
 use base64::Engine;
-use meshurl::encoder::encode_url;
+use meshurl::encoder::{encode_url, modem_preset_from_str, region_code_from_str};
 use meshurl::models::{
     get_preset_params, ChannelInfo, ChannelRole, LoRaInfo, MeshtasticConfig, PskMode, PskType,
     POSITION_OPTIONS,
@@ -96,39 +96,8 @@ impl LoRaPopupState {
     }
 
     pub fn to_lora_info(&self) -> LoRaInfo {
-        use meshtastic_protobufs::meshtastic::config::lo_ra_config::{ModemPreset, RegionCode};
-
-        let region = match self.region.as_str() {
-            "US" => RegionCode::Us,
-            "EU433" => RegionCode::Eu433,
-            "EU868" => RegionCode::Eu868,
-            "CN" => RegionCode::Cn,
-            "JP" => RegionCode::Jp,
-            "ANZ" => RegionCode::Anz,
-            "KR" => RegionCode::Kr,
-            "TW" => RegionCode::Tw,
-            "RU" => RegionCode::Ru,
-            "IN" => RegionCode::In,
-            "NZ865" => RegionCode::Nz865,
-            "TH" => RegionCode::Th,
-            "Lora24" => RegionCode::Lora24,
-            "UA433" => RegionCode::Ua433,
-            "UA868" => RegionCode::Ua868,
-            _ => RegionCode::Eu868,
-        };
-
-        let modem_preset = match self.modem_preset.as_str() {
-            "LongFast" => ModemPreset::LongFast,
-            "LongSlow" => ModemPreset::LongSlow,
-            "VeryLongSlow" => ModemPreset::VeryLongSlow,
-            "MediumSlow" => ModemPreset::MediumSlow,
-            "MediumFast" => ModemPreset::MediumFast,
-            "ShortSlow" => ModemPreset::ShortSlow,
-            "ShortFast" => ModemPreset::ShortFast,
-            "LongModerate" => ModemPreset::LongModerate,
-            "ShortTurbo" => ModemPreset::ShortTurbo,
-            _ => ModemPreset::LongFast,
-        };
+        let region = region_code_from_str(&self.region);
+        let modem_preset = modem_preset_from_str(&self.modem_preset);
 
         let (bandwidth, spread_factor, coding_rate) = get_preset_params(modem_preset);
 

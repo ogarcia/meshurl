@@ -180,11 +180,7 @@ impl std::str::FromStr for ChannelInfo {
             PskType::Default
         } else {
             match STANDARD.decode(&psk) {
-                Ok(bytes) => match bytes.len() {
-                    16 => PskType::Aes128,
-                    32 => PskType::Aes256,
-                    _ => PskType::Unknown,
-                },
+                Ok(bytes) => PskType::from_bytes(&bytes),
                 Err(_) => PskType::Unknown,
             }
         };
@@ -222,6 +218,22 @@ impl PskType {
             PskType::Aes128 => "AES-128",
             PskType::Aes256 => "AES-256",
             PskType::Unknown => "Unknown",
+        }
+    }
+
+    /// Determine PSK type from raw bytes.
+    pub fn from_bytes(psk: &[u8]) -> Self {
+        match psk.len() {
+            0 => PskType::None,
+            1 => match psk[0] {
+                0 => PskType::None,
+                1 => PskType::Default,
+                n if n >= 2 && n <= 10 => PskType::Simple(n),
+                _ => PskType::Unknown,
+            },
+            16 => PskType::Aes128,
+            32 => PskType::Aes256,
+            _ => PskType::Unknown,
         }
     }
 
@@ -328,18 +340,7 @@ impl From<&ChannelSettings> for ChannelInfo {
             STANDARD.encode(&settings.psk)
         };
 
-        let psk_type = match settings.psk.len() {
-            0 => PskType::None,
-            1 => match settings.psk[0] {
-                0 => PskType::None,
-                1 => PskType::Default,
-                n if n >= 2 && n <= 10 => PskType::Simple(n),
-                _ => PskType::Unknown,
-            },
-            16 => PskType::Aes128,
-            32 => PskType::Aes256,
-            _ => PskType::Unknown,
-        };
+        let psk_type = PskType::from_bytes(&settings.psk);
 
         let (position_precision, is_client_muted) = settings
             .module_settings
