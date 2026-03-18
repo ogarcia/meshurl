@@ -4,7 +4,12 @@ use ratatui::crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{backend::CrosstermBackend, widgets::ListState, Frame, Terminal};
+use ratatui::{
+    backend::CrosstermBackend,
+    style::{Color, Style},
+    widgets::{Block, Borders, ListState, Padding, Paragraph},
+    Frame, Terminal,
+};
 use ratatui_textarea::TextArea;
 use std::io;
 
@@ -22,6 +27,13 @@ pub enum ActivePanel {
     UrlEncode,
 }
 
+#[derive(Clone)]
+pub struct ToastMessage {
+    pub text: String,
+    pub is_success: bool,
+    pub is_uncertain: bool,
+}
+
 pub struct AppState {
     pub app_mode: AppMode,
     pub textarea: TextArea<'static>,
@@ -37,6 +49,8 @@ pub struct AppState {
     pub encode_channels_state: ListState,
     pub channel_popup: Option<crate::tui::encode::ChannelPopupState>,
     pub lora_popup: Option<crate::tui::encode::LoRaPopupState>,
+    pub toast: Option<ToastMessage>,
+    pub toast_timer: u8,
 }
 
 impl Default for AppState {
@@ -56,6 +70,8 @@ impl Default for AppState {
             encode_channels_state: ListState::default(),
             channel_popup: None,
             lora_popup: None,
+            toast: None,
+            toast_timer: 0,
         }
     }
 }
@@ -88,6 +104,13 @@ fn run_inner(
         terminal.draw(|f| {
             draw(f, state);
         })?;
+
+        if state.toast_timer > 0 {
+            state.toast_timer -= 1;
+        }
+        if state.toast_timer == 0 {
+            state.toast = None;
+        }
 
         if event::poll(std::time::Duration::from_millis(16))? {
             if let Event::Key(key) = event::read()? {
@@ -186,6 +209,8 @@ fn run_inner(
                                             &mut state.lora_popup,
                                             &mut state.lora_scroll,
                                             state.lora_max_scroll,
+                                            &mut state.toast,
+                                            &mut state.toast_timer,
                                         );
                                     } else {
                                         crate::tui::decode::handle_decode_keys(
@@ -226,6 +251,29 @@ fn draw(f: &mut Frame, state: &mut AppState) {
         if let Some(popup_state) = &state.channel_popup {
             crate::tui::encode::draw_channel_popup(f, popup_state);
         }
+
+        if let Some(toast) = &state.toast {
+            let color = if toast.is_uncertain {
+                Color::Yellow
+            } else if toast.is_success {
+                Color::Green
+            } else {
+                Color::Red
+            };
+            let area = f.area();
+            let width = toast.text.len() as u16 + 4;
+            let toast_area =
+                ratatui::layout::Rect::new(area.width.saturating_sub(width) - 1, 1, width, 3);
+            f.render_widget(ratatui::widgets::Clear, toast_area);
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .padding(Padding::new(1, 1, 0, 0))
+                .border_style(Style::default().fg(color));
+            let paragraph = Paragraph::new(toast.text.clone())
+                .style(Style::default().fg(color))
+                .block(block);
+            f.render_widget(paragraph, toast_area);
+        }
         return;
     }
 
@@ -240,4 +288,27 @@ fn draw(f: &mut Frame, state: &mut AppState) {
         state.lora_scroll,
         &mut state.lora_max_scroll,
     );
+
+    if let Some(toast) = &state.toast {
+        let color = if toast.is_uncertain {
+            Color::Yellow
+        } else if toast.is_success {
+            Color::Green
+        } else {
+            Color::Red
+        };
+        let area = f.area();
+        let width = toast.text.len() as u16 + 4;
+        let toast_area =
+            ratatui::layout::Rect::new(area.width.saturating_sub(width) - 1, 1, width, 3);
+        f.render_widget(ratatui::widgets::Clear, toast_area);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .padding(Padding::new(1, 1, 0, 0))
+            .border_style(Style::default().fg(color));
+        let paragraph = Paragraph::new(toast.text.clone())
+            .style(Style::default().fg(color))
+            .block(block);
+        f.render_widget(paragraph, toast_area);
+    }
 }

@@ -13,6 +13,7 @@ use ratatui::{
 };
 use ratatui_textarea::{CursorMove, TextArea};
 use std::io::Write;
+use std::process::Command;
 
 use crate::tui::app::ActivePanel;
 use crate::tui::widgets::{
@@ -447,6 +448,54 @@ pub fn draw_encode_mode(
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum CopyMethod {
+    Tool,
+    Osc52,
+}
+
+pub fn copy_to_clipboard(text: &str) -> Result<CopyMethod, String> {
+    if Command::new("wl-copy")
+        .arg(text)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        return Ok(CopyMethod::Tool);
+    }
+
+    if Command::new("xclip")
+        .args(["-selection", "clipboard"])
+        .arg(text)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        return Ok(CopyMethod::Tool);
+    }
+
+    if Command::new("xsel")
+        .args(["--clipboard", "--input"])
+        .arg(text)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        return Ok(CopyMethod::Tool);
+    }
+
+    use base64::Engine;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+    let osc52 = format!("\x1b]52;c;{}\x07", encoded);
+
+    let mut stdout = std::io::stdout();
+    if stdout.write_all(osc52.as_bytes()).is_ok() && stdout.flush().is_ok() {
+        return Ok(CopyMethod::Osc52);
+    }
+
+    Err("Failed to copy. Install wl-clipboard or xclip".to_string())
+}
+
 pub fn handle_encode_keys(
     key: ratatui::crossterm::event::KeyEvent,
     encode_config: &mut MeshtasticConfig,
@@ -457,6 +506,8 @@ pub fn handle_encode_keys(
     lora_popup: &mut Option<LoRaPopupState>,
     lora_scroll: &mut u16,
     lora_max_scroll: u16,
+    toast: &mut Option<crate::tui::app::ToastMessage>,
+    toast_timer: &mut u8,
 ) -> bool {
     use ratatui::crossterm::event::KeyCode;
 
@@ -529,10 +580,21 @@ pub fn handle_encode_keys(
     match key.code {
         KeyCode::Char('c') | KeyCode::Char('C') => {
             if let Some(url) = encoded_url {
-                let encoded = base64::engine::general_purpose::STANDARD.encode(url.as_bytes());
-                let osc52 = format!("\x1b]52;c;{}\x07", encoded);
-                std::io::stdout().write_all(osc52.as_bytes()).ok();
-                std::io::stdout().flush().ok();
+                let result = copy_to_clipboard(&url);
+                let is_ok = result.is_ok();
+                let is_uncertain = matches!(result, Ok(CopyMethod::Osc52));
+                *toast = Some(crate::tui::app::ToastMessage {
+                    text: match result {
+                        Ok(CopyMethod::Tool) => "Copied to clipboard!".to_string(),
+                        Ok(CopyMethod::Osc52) => {
+                            "Seems copied (if not work install wl-clipboard or xclip)".to_string()
+                        }
+                        Err(e) => e,
+                    },
+                    is_success: is_ok,
+                    is_uncertain,
+                });
+                *toast_timer = 120;
             }
             true
         }
