@@ -15,7 +15,7 @@ use ratatui_textarea::{CursorMove, TextArea};
 use std::io::Write;
 use std::process::Command;
 
-use crate::tui::app::ActivePanel;
+use crate::tui::app::{ActivePanel, EncodeState};
 use crate::tui::widgets::{
     channel_list_item, channel_scroll_indicator, channel_total_lines, lora_info_lines,
     lora_scroll_info,
@@ -550,36 +550,27 @@ pub fn copy_to_clipboard(text: &str) -> Result<CopyMethod, String> {
 
 pub fn handle_encode_keys(
     key: ratatui::crossterm::event::KeyEvent,
-    encode_config: &mut MeshtasticConfig,
-    encoded_url: &mut Option<String>,
-    active_panel: &mut ActivePanel,
-    encode_channels_state: &mut ListState,
-    channel_popup: &mut Option<ChannelPopupState>,
-    lora_popup: &mut Option<LoRaPopupState>,
-    lora_scroll: &mut u16,
-    lora_max_scroll: u16,
-    toast: &mut Option<crate::tui::app::ToastMessage>,
-    toast_timer: &mut u8,
+    state: &mut EncodeState,
 ) -> bool {
     use ratatui::crossterm::event::KeyCode;
 
-    if lora_popup.is_some() {
-        let popup = lora_popup.as_mut().unwrap();
+    if state.lora_popup.is_some() {
+        let popup = state.lora_popup.as_mut().unwrap();
 
         let result = handle_lora_popup_keys(key, popup);
 
         match result {
             Some(lora_info) => {
-                encode_config.lora = Some(lora_info);
-                *lora_popup = None;
+                state.encode_config.lora = Some(lora_info);
+                *state.lora_popup = None;
             }
             None => {
                 if key.code == KeyCode::Esc {
-                    *lora_popup = None;
+                    *state.lora_popup = None;
                 } else if key.code == KeyCode::Enter {
                     let field = LORA_FIELDS[popup.selected_field];
                     if field == "Cancel" {
-                        *lora_popup = None;
+                        *state.lora_popup = None;
                     }
                 }
             }
@@ -587,47 +578,49 @@ pub fn handle_encode_keys(
         return true;
     }
 
-    if channel_popup.is_some() {
-        let popup = channel_popup.as_mut().unwrap();
+    if state.channel_popup.is_some() {
+        let popup = state.channel_popup.as_mut().unwrap();
 
         if popup.editing_psk && matches!(key.code, KeyCode::Esc) {
             popup.cancel_editing_psk();
             return true;
         }
 
-        let result = handle_popup_keys(key, popup, toast, toast_timer);
+        let result = handle_popup_keys(key, popup, state.toast, state.toast_timer);
 
         match result {
             Some((idx, mut channel)) => {
-                if idx < encode_config.channels.len() && popup.channel_index.is_some() {
+                if idx < state.encode_config.channels.len() && popup.channel_index.is_some() {
                     channel.index = idx;
                     channel.role = if idx == 0 {
                         ChannelRole::Primary
                     } else {
                         ChannelRole::Secondary
                     };
-                    encode_config.channels[idx] = channel;
-                    encode_channels_state.select(Some(idx));
-                } else if encode_config.channels.len() < 8 {
-                    channel.index = encode_config.channels.len();
+                    state.encode_config.channels[idx] = channel;
+                    state.encode_channels_state.select(Some(idx));
+                } else if state.encode_config.channels.len() < 8 {
+                    channel.index = state.encode_config.channels.len();
                     channel.role = if channel.index == 0 {
                         ChannelRole::Primary
                     } else {
                         ChannelRole::Secondary
                     };
-                    encode_config.channels.push(channel);
-                    encode_channels_state.select(Some(encode_config.channels.len() - 1));
+                    state.encode_config.channels.push(channel);
+                    state
+                        .encode_channels_state
+                        .select(Some(state.encode_config.channels.len() - 1));
                 }
-                *channel_popup = None;
+                *state.channel_popup = None;
             }
             None => {
                 if key.code == KeyCode::Esc {
-                    *channel_popup = None;
+                    *state.channel_popup = None;
                 } else if key.code == KeyCode::Enter {
                     let popup_fields = get_popup_fields(&popup.psk_mode);
                     let field = popup_fields[popup.selected_field];
                     if field == "Cancel" {
-                        *channel_popup = None;
+                        *state.channel_popup = None;
                     }
                 }
             }
@@ -637,11 +630,11 @@ pub fn handle_encode_keys(
 
     match key.code {
         KeyCode::Char('c') | KeyCode::Char('C') => {
-            if let Some(url) = encoded_url {
+            if let Some(url) = state.encoded_url.clone() {
                 let result = copy_to_clipboard(&url);
                 let is_ok = result.is_ok();
                 let is_uncertain = matches!(result, Ok(CopyMethod::Osc52));
-                *toast = Some(crate::tui::app::ToastMessage {
+                *state.toast = Some(crate::tui::app::ToastMessage {
                     text: match result {
                         Ok(CopyMethod::Tool) => "Copied to clipboard!".to_string(),
                         Ok(CopyMethod::Osc52) => {
@@ -652,72 +645,72 @@ pub fn handle_encode_keys(
                     is_success: is_ok,
                     is_uncertain,
                 });
-                *toast_timer = 120;
+                *state.toast_timer = 120;
             }
             true
         }
         KeyCode::Delete => {
-            encode_config.channels.clear();
-            encode_config.lora = None;
-            *encoded_url = None;
-            encode_channels_state.select(None);
-            *lora_scroll = 0;
-            *lora_popup = None;
-            *channel_popup = None;
+            state.encode_config.channels.clear();
+            state.encode_config.lora = None;
+            *state.encoded_url = None;
+            state.encode_channels_state.select(None);
+            *state.lora_scroll = 0;
+            *state.lora_popup = None;
+            *state.channel_popup = None;
             true
         }
         KeyCode::Char('a') | KeyCode::Char('A') => {
-            if encode_config.channels.len() < 8 {
-                *channel_popup = Some(ChannelPopupState::new());
+            if state.encode_config.channels.len() < 8 {
+                *state.channel_popup = Some(ChannelPopupState::new());
             }
             true
         }
         KeyCode::Enter => {
-            if let Some(selected) = encode_channels_state.selected() {
-                if selected < encode_config.channels.len() {
-                    let channel = &encode_config.channels[selected];
-                    *channel_popup = Some(ChannelPopupState::from_channel(selected, channel));
+            if let Some(selected) = state.encode_channels_state.selected() {
+                if selected < state.encode_config.channels.len() {
+                    let channel = &state.encode_config.channels[selected];
+                    *state.channel_popup = Some(ChannelPopupState::from_channel(selected, channel));
                 }
             }
             true
         }
         KeyCode::Char('+') => {
-            if let Some(idx) = encode_channels_state.selected() {
-                if idx < encode_config.channels.len() - 1 {
-                    encode_config.channels.swap(idx, idx + 1);
-                    for (i, ch) in encode_config.channels.iter_mut().enumerate() {
+            if let Some(idx) = state.encode_channels_state.selected() {
+                if idx < state.encode_config.channels.len() - 1 {
+                    state.encode_config.channels.swap(idx, idx + 1);
+                    for (i, ch) in state.encode_config.channels.iter_mut().enumerate() {
                         ch.role = if i == 0 {
                             ChannelRole::Primary
                         } else {
                             ChannelRole::Secondary
                         };
                     }
-                    encode_channels_state.select(Some(idx + 1));
+                    state.encode_channels_state.select(Some(idx + 1));
                 }
             }
             false
         }
         KeyCode::Char('-') => {
-            if let Some(idx) = encode_channels_state.selected() {
+            if let Some(idx) = state.encode_channels_state.selected() {
                 if idx > 0 {
-                    encode_config.channels.swap(idx, idx - 1);
-                    for (i, ch) in encode_config.channels.iter_mut().enumerate() {
+                    state.encode_config.channels.swap(idx, idx - 1);
+                    for (i, ch) in state.encode_config.channels.iter_mut().enumerate() {
                         ch.role = if i == 0 {
                             ChannelRole::Primary
                         } else {
                             ChannelRole::Secondary
                         };
                     }
-                    encode_channels_state.select(Some(idx - 1));
+                    state.encode_channels_state.select(Some(idx - 1));
                 }
             }
             false
         }
         KeyCode::Char('d') | KeyCode::Char('D') => {
-            if let Some(selected) = encode_channels_state.selected() {
-                if selected < encode_config.channels.len() {
-                    encode_config.channels.remove(selected);
-                    for (i, channel) in encode_config.channels.iter_mut().enumerate() {
+            if let Some(selected) = state.encode_channels_state.selected() {
+                if selected < state.encode_config.channels.len() {
+                    state.encode_config.channels.remove(selected);
+                    for (i, channel) in state.encode_config.channels.iter_mut().enumerate() {
                         channel.index = i;
                         channel.role = if i == 0 {
                             ChannelRole::Primary
@@ -725,54 +718,56 @@ pub fn handle_encode_keys(
                             ChannelRole::Secondary
                         };
                     }
-                    if encode_config.channels.is_empty() {
-                        encode_channels_state.select(None);
-                    } else if selected >= encode_config.channels.len() {
-                        encode_channels_state.select(Some(encode_config.channels.len() - 1));
+                    if state.encode_config.channels.is_empty() {
+                        state.encode_channels_state.select(None);
+                    } else if selected >= state.encode_config.channels.len() {
+                        state
+                            .encode_channels_state
+                            .select(Some(state.encode_config.channels.len() - 1));
                     }
                 }
             }
             false
         }
         KeyCode::Char('e') | KeyCode::Char('E') => {
-            *lora_popup = Some(match &encode_config.lora {
+            *state.lora_popup = Some(match &state.encode_config.lora {
                 Some(lora) => LoRaPopupState::from_lora(lora),
                 None => LoRaPopupState::new(),
             });
             true
         }
         KeyCode::Char('g') | KeyCode::Char('G') => {
-            if !encode_config.channels.is_empty() {
-                match encode_url(encode_config) {
-                    Ok(url) => *encoded_url = Some(url),
-                    Err(e) => *encoded_url = Some(format!("Error: {}", e)),
+            if !state.encode_config.channels.is_empty() {
+                match encode_url(state.encode_config) {
+                    Ok(url) => *state.encoded_url = Some(url),
+                    Err(e) => *state.encoded_url = Some(format!("Error: {}", e)),
                 }
             }
             true
         }
         KeyCode::Up => {
-            if *active_panel == ActivePanel::Channels {
-                if let Some(selected) = encode_channels_state.selected() {
+            if *state.active_panel == ActivePanel::Channels {
+                if let Some(selected) = state.encode_channels_state.selected() {
                     if selected > 0 {
-                        encode_channels_state.select(Some(selected - 1));
+                        state.encode_channels_state.select(Some(selected - 1));
                     }
                 } else {
-                    encode_channels_state.select(Some(0));
+                    state.encode_channels_state.select(Some(0));
                 }
-            } else if *active_panel == ActivePanel::Lora {
-                *lora_scroll = lora_scroll.saturating_sub(1);
+            } else if *state.active_panel == ActivePanel::Lora {
+                *state.lora_scroll = state.lora_scroll.saturating_sub(1);
             }
             false
         }
         KeyCode::Down => {
-            if *active_panel == ActivePanel::Channels {
-                if let Some(selected) = encode_channels_state.selected() {
-                    encode_channels_state.select(Some(selected + 1));
+            if *state.active_panel == ActivePanel::Channels {
+                if let Some(selected) = state.encode_channels_state.selected() {
+                    state.encode_channels_state.select(Some(selected + 1));
                 } else {
-                    encode_channels_state.select(Some(0));
+                    state.encode_channels_state.select(Some(0));
                 }
-            } else if *active_panel == ActivePanel::Lora {
-                *lora_scroll = (*lora_scroll + 1).min(lora_max_scroll);
+            } else if *state.active_panel == ActivePanel::Lora {
+                *state.lora_scroll = (*state.lora_scroll + 1).min(*state.lora_max_scroll);
             }
             false
         }

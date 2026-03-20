@@ -53,6 +53,30 @@ pub struct AppState {
     pub toast_timer: u8,
 }
 
+pub struct DecodeState<'a> {
+    pub active_panel: &'a mut ActivePanel,
+    pub textarea: &'a mut TextArea<'static>,
+    pub config_result: &'a mut Option<Result<MeshtasticConfig, String>>,
+    pub editing_url: &'a mut bool,
+    pub channels_scroll: &'a mut usize,
+    pub lora_scroll: &'a mut u16,
+    pub lora_max_scroll: &'a mut u16,
+    pub channels_list_state: &'a mut ListState,
+}
+
+pub struct EncodeState<'a> {
+    pub encode_config: &'a mut MeshtasticConfig,
+    pub encoded_url: &'a mut Option<String>,
+    pub active_panel: &'a mut ActivePanel,
+    pub encode_channels_state: &'a mut ListState,
+    pub channel_popup: &'a mut Option<crate::tui::encode::ChannelPopupState>,
+    pub lora_popup: &'a mut Option<crate::tui::encode::LoRaPopupState>,
+    pub lora_scroll: &'a mut u16,
+    pub lora_max_scroll: &'a mut u16,
+    pub toast: &'a mut Option<ToastMessage>,
+    pub toast_timer: &'a mut u8,
+}
+
 impl Default for AppState {
     fn default() -> Self {
         Self {
@@ -220,30 +244,36 @@ fn run_inner(
                                 }
                                 _ => {
                                     if state.app_mode == AppMode::Encode {
+                                        let mut encode_state = EncodeState {
+                                            encode_config: &mut state.encode_config,
+                                            encoded_url: &mut state.encoded_url,
+                                            active_panel: &mut state.active_panel,
+                                            encode_channels_state: &mut state.encode_channels_state,
+                                            channel_popup: &mut state.channel_popup,
+                                            lora_popup: &mut state.lora_popup,
+                                            lora_scroll: &mut state.lora_scroll,
+                                            lora_max_scroll: &mut state.lora_max_scroll,
+                                            toast: &mut state.toast,
+                                            toast_timer: &mut state.toast_timer,
+                                        };
                                         crate::tui::encode::handle_encode_keys(
                                             key,
-                                            &mut state.encode_config,
-                                            &mut state.encoded_url,
-                                            &mut state.active_panel,
-                                            &mut state.encode_channels_state,
-                                            &mut state.channel_popup,
-                                            &mut state.lora_popup,
-                                            &mut state.lora_scroll,
-                                            state.lora_max_scroll,
-                                            &mut state.toast,
-                                            &mut state.toast_timer,
+                                            &mut encode_state,
                                         );
                                     } else {
+                                        let mut decode_state = DecodeState {
+                                            active_panel: &mut state.active_panel,
+                                            textarea: &mut state.textarea,
+                                            config_result: &mut state.config_result,
+                                            editing_url: &mut state.editing_url,
+                                            channels_scroll: &mut state.channels_scroll,
+                                            lora_scroll: &mut state.lora_scroll,
+                                            lora_max_scroll: &mut state.lora_max_scroll,
+                                            channels_list_state: &mut state.channels_list_state,
+                                        };
                                         crate::tui::decode::handle_decode_keys(
                                             key,
-                                            &mut state.active_panel,
-                                            &mut state.textarea,
-                                            &mut state.config_result,
-                                            &mut state.editing_url,
-                                            &mut state.channels_scroll,
-                                            &mut state.lora_scroll,
-                                            &mut state.lora_max_scroll,
-                                            &mut state.channels_list_state,
+                                            &mut decode_state,
                                         );
                                     }
                                 }

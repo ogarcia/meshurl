@@ -9,7 +9,7 @@ use ratatui::{
 };
 use ratatui_textarea::TextArea;
 
-use crate::tui::app::ActivePanel;
+use crate::tui::app::{ActivePanel, DecodeState};
 use crate::tui::widgets::{
     channel_list_item, channel_scroll_indicator, channel_total_lines, lora_info_lines,
     lora_scroll_info,
@@ -271,77 +271,75 @@ pub fn draw_decode_mode(
 
 pub fn handle_decode_keys(
     key: ratatui::crossterm::event::KeyEvent,
-    active_panel: &ActivePanel,
-    textarea: &mut TextArea,
-    config_result: &mut Option<Result<MeshtasticConfig, String>>,
-    editing_url: &mut bool,
-    channels_scroll: &mut usize,
-    lora_scroll: &mut u16,
-    lora_max_scroll: &mut u16,
-    channels_list_state: &mut ListState,
+    state: &mut DecodeState,
 ) -> bool {
     use ratatui::crossterm::event::KeyCode;
 
     match key.code {
         KeyCode::Delete => {
-            *textarea = TextArea::default();
-            *config_result = None;
-            *channels_scroll = 0;
-            *lora_scroll = 0;
-            *lora_max_scroll = 0;
-            channels_list_state.select(None);
+            *state.textarea = TextArea::default();
+            *state.config_result = None;
+            *state.channels_scroll = 0;
+            *state.lora_scroll = 0;
+            *state.lora_max_scroll = 0;
+            state.channels_list_state.select(None);
             true
         }
         KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Left | KeyCode::Right => {
-            if *editing_url {
-                textarea.input(key);
+            if *state.editing_url {
+                state.textarea.input(key);
             }
             false
         }
         KeyCode::Up => {
-            if *active_panel == ActivePanel::Channels {
-                if channels_list_state.selected().unwrap_or(0) > 0 {
-                    channels_list_state.select(Some(channels_list_state.selected().unwrap() - 1));
+            if *state.active_panel == ActivePanel::Channels {
+                if state.channels_list_state.selected().unwrap_or(0) > 0 {
+                    state
+                        .channels_list_state
+                        .select(Some(state.channels_list_state.selected().unwrap() - 1));
                 } else {
-                    channels_list_state.select(Some(0));
+                    state.channels_list_state.select(Some(0));
                 }
-                *channels_scroll = channels_list_state.selected().unwrap_or(0);
-            } else if *active_panel == ActivePanel::Lora {
-                *lora_scroll = lora_scroll.saturating_sub(1).min(*lora_max_scroll);
+                *state.channels_scroll = state.channels_list_state.selected().unwrap_or(0);
+            } else if *state.active_panel == ActivePanel::Lora {
+                *state.lora_scroll = state
+                    .lora_scroll
+                    .saturating_sub(1)
+                    .min(*state.lora_max_scroll);
             }
             false
         }
         KeyCode::Down => {
-            if *active_panel == ActivePanel::Channels {
-                if let Some(config) = config_result {
+            if *state.active_panel == ActivePanel::Channels {
+                if let Some(config) = state.config_result {
                     if let Ok(cfg) = config {
                         let max = cfg.channels.len().saturating_sub(1);
-                        let current = channels_list_state.selected().unwrap_or(0);
+                        let current = state.channels_list_state.selected().unwrap_or(0);
                         if current < max {
-                            channels_list_state.select(Some(current + 1));
+                            state.channels_list_state.select(Some(current + 1));
                         }
                     }
                 }
-                *channels_scroll = channels_list_state.selected().unwrap_or(0);
-            } else if *active_panel == ActivePanel::Lora {
-                *lora_scroll = (*lora_scroll + 1).min(*lora_max_scroll);
+                *state.channels_scroll = state.channels_list_state.selected().unwrap_or(0);
+            } else if *state.active_panel == ActivePanel::Lora {
+                *state.lora_scroll = (*state.lora_scroll + 1).min(*state.lora_max_scroll);
             }
             false
         }
         KeyCode::Enter => {
-            if *editing_url {
-                let text = textarea.lines().first().map_or("", |l| l.as_str());
+            if *state.editing_url {
+                let text = state.textarea.lines().first().map_or("", |l| l.as_str());
                 if !text.is_empty() {
                     let result = decode_url(text).map_err(|e| e.to_string());
-                    *config_result = Some(result.clone());
+                    *state.config_result = Some(result.clone());
                     if result.is_ok() {
-                        channels_list_state.select(Some(0));
-                        *lora_scroll = 0;
-                        *editing_url = false;
+                        state.channels_list_state.select(Some(0));
+                        *state.lora_scroll = 0;
+                        *state.editing_url = false;
                     }
                 }
             } else {
-                *editing_url = true;
+                *state.editing_url = true;
             }
             false
         }
