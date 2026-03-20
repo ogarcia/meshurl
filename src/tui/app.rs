@@ -131,11 +131,23 @@ fn run_inner(
                                 .as_ref()
                                 .map_or(false, |p| p.editing_name);
 
+                        let is_editing_channel_psk = state.app_mode == AppMode::Encode
+                            && state
+                                .channel_popup
+                                .as_ref()
+                                .map_or(false, |p| p.editing_psk);
+
                         if is_editing_channel_name
                             && !matches!(key.code, KeyCode::Esc | KeyCode::Enter)
                         {
                             if let Some(popup) = state.channel_popup.as_mut() {
                                 popup.name_textarea.input(key);
+                            }
+                        } else if is_editing_channel_psk
+                            && !matches!(key.code, KeyCode::Esc | KeyCode::Enter)
+                        {
+                            if let Some(popup) = state.channel_popup.as_mut() {
+                                popup.psk_textarea.input(key);
                             }
                         } else {
                             match key.code {
@@ -184,6 +196,15 @@ fn run_inner(
                                     {
                                         if let Some(popup) = state.channel_popup.as_mut() {
                                             popup.cancel_editing_name();
+                                        }
+                                    } else if state.app_mode == AppMode::Encode
+                                        && state
+                                            .channel_popup
+                                            .as_ref()
+                                            .map_or(false, |p| p.editing_psk)
+                                    {
+                                        if let Some(popup) = state.channel_popup.as_mut() {
+                                            popup.cancel_editing_psk();
                                         }
                                     } else if state.app_mode == AppMode::Encode
                                         && state.channel_popup.is_some()

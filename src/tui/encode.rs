@@ -25,6 +25,7 @@ pub struct ChannelPopupState {
     pub channel_index: Option<usize>,
     pub name: String,
     pub psk_mode: PskMode,
+    pub psk_value: String,
     pub uplink_enabled: bool,
     pub downlink_enabled: bool,
     pub position_index: usize,
@@ -32,6 +33,8 @@ pub struct ChannelPopupState {
     pub selected_field: usize,
     pub editing_name: bool,
     pub name_textarea: TextArea<'static>,
+    pub editing_psk: bool,
+    pub psk_textarea: TextArea<'static>,
 }
 
 pub struct LoRaPopupState {
@@ -164,10 +167,12 @@ const LORA_FIELDS: &[&str] = &[
 impl ChannelPopupState {
     pub fn new() -> Self {
         let name_textarea = TextArea::default();
+        let psk_textarea = TextArea::default();
         Self {
             channel_index: None,
             name: String::new(),
             psk_mode: PskMode::Default,
+            psk_value: String::new(),
             uplink_enabled: false,
             downlink_enabled: false,
             position_index: 0,
@@ -175,19 +180,22 @@ impl ChannelPopupState {
             selected_field: 0,
             editing_name: false,
             name_textarea,
+            editing_psk: false,
+            psk_textarea,
         }
     }
 
     pub fn from_channel(index: usize, channel: &ChannelInfo) -> Self {
-        let psk_mode = if channel.psk.is_empty() {
-            PskMode::None
+        let (psk_mode, psk_value) = if channel.psk.is_empty() {
+            (PskMode::None, String::new())
         } else if channel.psk == DEFAULT_PSK {
-            PskMode::Default
+            (PskMode::Default, String::new())
         } else {
-            PskMode::Random
+            (PskMode::Manual(channel.psk.clone()), channel.psk.clone())
         };
 
         let name_textarea = TextArea::default();
+        let psk_textarea = TextArea::default();
         let position_precision = channel.position_precision.unwrap_or(0);
         let position_index = POSITION_OPTIONS
             .iter()
@@ -197,6 +205,7 @@ impl ChannelPopupState {
             channel_index: Some(index),
             name: channel.name.clone(),
             psk_mode,
+            psk_value,
             uplink_enabled: channel.uplink_enabled,
             downlink_enabled: channel.downlink_enabled,
             position_index,
@@ -204,6 +213,8 @@ impl ChannelPopupState {
             selected_field: 0,
             editing_name: false,
             name_textarea,
+            editing_psk: false,
+            psk_textarea,
         }
     }
 
@@ -228,13 +239,34 @@ impl ChannelPopupState {
         self.editing_name = false;
     }
 
+    pub fn start_editing_psk(&mut self) {
+        let current_psk = self.psk_value.clone();
+        self.editing_psk = true;
+        self.psk_textarea = TextArea::new(vec![current_psk]);
+        self.psk_textarea.move_cursor(CursorMove::End);
+    }
+
+    pub fn finish_editing_psk(&mut self) {
+        self.psk_value = self
+            .psk_textarea
+            .lines()
+            .first()
+            .map_or(String::new(), |l| l.to_string());
+        self.editing_psk = false;
+    }
+
+    pub fn cancel_editing_psk(&mut self) {
+        self.psk_textarea = TextArea::default();
+        self.editing_psk = false;
+    }
+
     pub fn to_channel_info(&self, default_index: usize) -> (usize, ChannelInfo) {
         use base64::engine::general_purpose::STANDARD;
         use std::time::{SystemTime, UNIX_EPOCH};
 
         let index = self.channel_index.unwrap_or(default_index);
 
-        let (psk, psk_type) = match self.psk_mode {
+        let (psk, psk_type) = match &self.psk_mode {
             PskMode::Default => (DEFAULT_PSK.to_string(), PskType::Default),
             PskMode::None => (String::new(), PskType::None),
             PskMode::Random => {
@@ -249,6 +281,35 @@ impl ChannelPopupState {
                     *byte = (rng >> 16) as u8;
                 }
                 let psk = STANDARD.encode(&bytes);
+                (psk, PskType::Aes256)
+            }
+            PskMode::Manual(psk_str) => {
+                let psk = if psk_str.is_empty() {
+                    String::new()
+                } else {
+                    match STANDARD.decode(psk_str) {
+                        Ok(bytes) if bytes.len() == 16 || bytes.len() == 32 => psk_str.clone(),
+                        _ => DEFAULT_PSK.to_string(),
+                    }
+                };
+                let psk_type = if psk.is_empty() {
+                    PskType::None
+                } else if psk == DEFAULT_PSK {
+                    PskType::Default
+                } else {
+                    match STANDARD.decode(&psk) {
+                        Ok(bytes) => PskType::from_bytes(&bytes),
+                        Err(_) => PskType::Unknown,
+                    }
+                };
+                (psk, psk_type)
+            }
+            PskMode::Phrase(phrase) => {
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(phrase.as_bytes());
+                let result = hasher.finalize();
+                let psk = STANDARD.encode(result.as_slice());
                 (psk, PskType::Aes256)
             }
         };
@@ -274,9 +335,16 @@ impl ChannelPopupState {
     }
 }
 
-const POPUP_FIELDS: &[&str] = &[
-    "Name", "PSK Mode", "Uplink", "Downlink", "Position", "Muted", "Save", "Cancel",
-];
+fn get_popup_fields(psk_mode: &PskMode) -> Vec<&'static str> {
+    let mut fields = vec!["Name", "PSK Mode"];
+
+    if matches!(psk_mode, PskMode::Manual(_) | PskMode::Phrase(_)) {
+        fields.push("PSK");
+    }
+
+    fields.extend_from_slice(&["Uplink", "Downlink", "Position", "Muted", "Save", "Cancel"]);
+    fields
+}
 
 pub fn draw_encode_mode(
     f: &mut Frame,
@@ -538,7 +606,12 @@ pub fn handle_encode_keys(
     if channel_popup.is_some() {
         let popup = channel_popup.as_mut().unwrap();
 
-        let result = handle_popup_keys(key, popup);
+        if popup.editing_psk && matches!(key.code, KeyCode::Esc) {
+            popup.cancel_editing_psk();
+            return true;
+        }
+
+        let result = handle_popup_keys(key, popup, toast, toast_timer);
 
         match result {
             Some((idx, mut channel)) => {
@@ -567,7 +640,8 @@ pub fn handle_encode_keys(
                 if key.code == KeyCode::Esc {
                     *channel_popup = None;
                 } else if key.code == KeyCode::Enter {
-                    let field = POPUP_FIELDS[popup.selected_field];
+                    let popup_fields = get_popup_fields(&popup.psk_mode);
+                    let field = popup_fields[popup.selected_field];
                     if field == "Cancel" {
                         *channel_popup = None;
                     }
@@ -758,7 +832,8 @@ pub fn handle_encode_tab(
 pub fn draw_channel_popup(f: &mut Frame, state: &ChannelPopupState) {
     let area = f.area();
     let width = 35.min(area.width - 4);
-    let height = (POPUP_FIELDS.len() as u16 + 2).min(area.height - 4);
+    let popup_fields = get_popup_fields(&state.psk_mode);
+    let height = (popup_fields.len() as u16 + 2).min(area.height - 4);
     let x = (area.width - width) / 2;
     let y = (area.height - height) / 2;
 
@@ -779,7 +854,9 @@ pub fn draw_channel_popup(f: &mut Frame, state: &ChannelPopupState) {
 
     let inner_rect = popup_rect.inner(ratatui::layout::Margin::new(1, 1));
 
-    for (i, field) in POPUP_FIELDS.iter().enumerate() {
+    let popup_fields = get_popup_fields(&state.psk_mode);
+
+    for (i, field) in popup_fields.iter().enumerate() {
         let row_y = inner_rect.y + i as u16;
         if row_y >= inner_rect.y + inner_rect.height {
             break;
@@ -800,11 +877,21 @@ pub fn draw_channel_popup(f: &mut Frame, state: &ChannelPopupState) {
                     }
                 }
             }
-            "PSK Mode" => match state.psk_mode {
+            "PSK Mode" => match &state.psk_mode {
                 PskMode::Default => "Default".to_string(),
                 PskMode::None => "None".to_string(),
                 PskMode::Random => "Random".to_string(),
+                PskMode::Manual(_) => "Manual".to_string(),
+                PskMode::Phrase(_) => "Phrase".to_string(),
             },
+            "PSK" => {
+                let max_len = 22;
+                if state.psk_value.len() > max_len {
+                    format!("{}…", &state.psk_value[..max_len])
+                } else {
+                    state.psk_value.clone()
+                }
+            }
             "Uplink" => if state.uplink_enabled { "✓" } else { "✗" }.to_string(),
             "Downlink" => if state.downlink_enabled { "✓" } else { "✗" }.to_string(),
             "Position" => POSITION_OPTIONS[state.position_index].0.to_string(),
@@ -858,6 +945,41 @@ pub fn draw_channel_popup(f: &mut Frame, state: &ChannelPopupState) {
 
         let input_rect = overlay_rect.inner(ratatui::layout::Margin::new(1, 1));
         let mut textarea = state.name_textarea.clone();
+        textarea.set_cursor_line_style(Style::default());
+        textarea.set_block(Block::default().borders(Borders::NONE));
+        f.render_widget(&textarea, input_rect);
+    }
+
+    if state.editing_psk {
+        let overlay_width = 40.min(area.width - 4);
+        let overlay_height = 3;
+        let overlay_x = (area.width - overlay_width) / 2;
+        let overlay_y = (area.height - overlay_height) / 2;
+
+        let overlay_rect =
+            ratatui::layout::Rect::new(overlay_x, overlay_y, overlay_width, overlay_height);
+
+        f.render_widget(Clear, overlay_rect);
+
+        let psk_title = match state.psk_mode {
+            PskMode::Manual(_) => " PSK (base64) ",
+            PskMode::Phrase(_) => " PSK (phrase) ",
+            _ => " PSK ",
+        };
+
+        let bg_block = Block::default()
+            .title(psk_title)
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title_style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            );
+        f.render_widget(bg_block, overlay_rect);
+
+        let input_rect = overlay_rect.inner(ratatui::layout::Margin::new(1, 1));
+        let mut textarea = state.psk_textarea.clone();
         textarea.set_cursor_line_style(Style::default());
         textarea.set_block(Block::default().borders(Borders::NONE));
         f.render_widget(&textarea, input_rect);
@@ -1163,12 +1285,60 @@ pub fn handle_lora_popup_keys(
 pub fn handle_popup_keys(
     key: ratatui::crossterm::event::KeyEvent,
     state: &mut ChannelPopupState,
+    toast: &mut Option<crate::tui::app::ToastMessage>,
+    toast_timer: &mut u8,
 ) -> Option<(usize, ChannelInfo)> {
+    use base64::engine::general_purpose::STANDARD;
     use ratatui::crossterm::event::KeyCode;
 
     if state.editing_name {
         if matches!(key.code, KeyCode::Enter) {
             state.finish_editing_name();
+        }
+        return None;
+    }
+
+    if state.editing_psk {
+        if matches!(key.code, KeyCode::Enter) {
+            if matches!(state.psk_mode, PskMode::Manual(_)) {
+                let psk_value = state
+                    .psk_textarea
+                    .lines()
+                    .first()
+                    .map_or(String::new(), |l| l.to_string());
+
+                if !psk_value.is_empty() {
+                    match STANDARD.decode(&psk_value) {
+                        Ok(bytes) if bytes.len() == 16 || bytes.len() == 32 => {
+                            state.psk_value = psk_value;
+                            state.editing_psk = false;
+                        }
+                        Ok(_) => {
+                            *toast = Some(crate::tui::app::ToastMessage {
+                                text: "PSK must be 16 or 32 bytes".to_string(),
+                                is_success: false,
+                                is_uncertain: false,
+                            });
+                            *toast_timer = 120;
+                            return None;
+                        }
+                        Err(_) => {
+                            *toast = Some(crate::tui::app::ToastMessage {
+                                text: "Invalid base64 PSK".to_string(),
+                                is_success: false,
+                                is_uncertain: false,
+                            });
+                            *toast_timer = 120;
+                            return None;
+                        }
+                    }
+                } else {
+                    state.psk_value = psk_value;
+                }
+                state.editing_psk = false;
+            } else {
+                state.finish_editing_psk();
+            }
         }
         return None;
     }
@@ -1185,17 +1355,19 @@ pub fn handle_popup_keys(
         return None;
     }
 
+    let popup_fields = get_popup_fields(&state.psk_mode);
+
     match key.code {
         KeyCode::Up => {
             if state.selected_field > 0 {
                 state.selected_field -= 1;
             } else {
-                state.selected_field = POPUP_FIELDS.len() - 1;
+                state.selected_field = popup_fields.len() - 1;
             }
             None
         }
         KeyCode::Down => {
-            if state.selected_field < POPUP_FIELDS.len() - 1 {
+            if state.selected_field < popup_fields.len() - 1 {
                 state.selected_field += 1;
             } else {
                 state.selected_field = 0;
@@ -1203,7 +1375,7 @@ pub fn handle_popup_keys(
             None
         }
         _ => {
-            let field = POPUP_FIELDS[state.selected_field];
+            let field = popup_fields[state.selected_field];
             match field {
                 "Save" => {
                     if is_enter {
@@ -1218,13 +1390,36 @@ pub fn handle_popup_keys(
                     }
                     None
                 }
+                "PSK" => {
+                    if is_enter {
+                        state.start_editing_psk();
+                    }
+                    None
+                }
                 "PSK Mode" => {
                     if cycle_forward || cycle_backward {
-                        state.psk_mode = match state.psk_mode {
-                            PskMode::Default => PskMode::None,
-                            PskMode::None => PskMode::Random,
-                            PskMode::Random => PskMode::Default,
+                        let (new_mode, new_value) = match (&state.psk_mode, cycle_forward) {
+                            (PskMode::Default, true) => (PskMode::None, String::new()),
+                            (PskMode::None, true) => (PskMode::Random, String::new()),
+                            (PskMode::Random, true) => {
+                                (PskMode::Manual(String::new()), String::new())
+                            }
+                            (PskMode::Manual(_), true) => {
+                                (PskMode::Phrase(String::new()), String::new())
+                            }
+                            (PskMode::Phrase(_), true) => (PskMode::Default, String::new()),
+                            (PskMode::Default, false) => {
+                                (PskMode::Phrase(String::new()), String::new())
+                            }
+                            (PskMode::None, false) => (PskMode::Default, String::new()),
+                            (PskMode::Random, false) => (PskMode::None, String::new()),
+                            (PskMode::Manual(_), false) => (PskMode::Random, String::new()),
+                            (PskMode::Phrase(_), false) => {
+                                (PskMode::Manual(String::new()), String::new())
+                            }
                         };
+                        state.psk_mode = new_mode;
+                        state.psk_value = new_value;
                     }
                     None
                 }

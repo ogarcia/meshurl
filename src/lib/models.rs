@@ -35,11 +35,21 @@ pub const MESHTASTIC_URL_BASE: &str = "https://meshtastic.org/e/#";
 /// - Default: uses the default (weak, public) key
 /// - None: no encryption
 /// - Random: generates a secure random key (AES-256)
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// - Manual: user provides a raw PSK in base64 (16 or 32 bytes)
+/// - Phrase: user provides a text phrase that gets hashed to a PSK
+#[derive(Debug, Clone, PartialEq)]
 pub enum PskMode {
     Default,
     None,
     Random,
+    Manual(String),
+    Phrase(String),
+}
+
+impl PskMode {
+    pub fn is_none(&self) -> bool {
+        matches!(self, PskMode::None)
+    }
 }
 
 /// PSK encryption type used.
@@ -125,6 +135,12 @@ impl std::str::FromStr for ChannelInfo {
                         Some("default") | Some("d") => Some(PskMode::Default),
                         Some("none") | Some("n") => Some(PskMode::None),
                         Some("random") | Some("r") => Some(PskMode::Random),
+                        Some(v) if v.starts_with("manual:") => {
+                            Some(PskMode::Manual(v[7..].to_string()))
+                        }
+                        Some(v) if v.starts_with("phrase:") => {
+                            Some(PskMode::Phrase(v[7..].to_string()))
+                        }
                         _ => None,
                     }
                 }
@@ -176,6 +192,20 @@ impl std::str::FromStr for ChannelInfo {
                             *byte = (rng >> 16) as u8;
                         }
                         STANDARD.encode(&bytes)
+                    }
+                    PskMode::Manual(psk_str) => STANDARD
+                        .decode(psk_str)
+                        .map_err(|_| "Invalid Base64 PSK".to_string())
+                        .and_then(|bytes| match bytes.len() {
+                            16 | 32 => Ok(STANDARD.encode(&bytes)),
+                            n => Err(format!("Invalid PSK length: {} bytes", n)),
+                        })?,
+                    PskMode::Phrase(phrase) => {
+                        use sha2::{Digest, Sha256};
+                        let mut hasher = Sha256::new();
+                        hasher.update(phrase.as_bytes());
+                        let result = hasher.finalize();
+                        STANDARD.encode(result.as_slice())
                     }
                 }
             };
@@ -526,5 +556,38 @@ impl From<&LoRaInfo> for LoRaConfig {
             config_ok_to_mqtt: info.config_ok_to_mqtt,
             ignore_incoming: info.ignore_incoming.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_channel_info_psk_mode_manual() {
+        let psk = "CcZBoFJbADPGEoSkkYPA3Ha23rr7WPcyUo1AjorGQIA=";
+        let channel: ChannelInfo = format!("psk_mode=manual:{}", psk).parse().unwrap();
+        assert!(channel.psk_type != PskType::None);
+        assert!(!channel.psk.is_empty());
+        assert_eq!(channel.psk, psk);
+    }
+
+    #[test]
+    fn test_channel_info_psk_mode_phrase() {
+        let channel: ChannelInfo = "psk_mode=phrase:my secret phrase".parse().unwrap();
+        assert_eq!(channel.psk_type, PskType::Aes256);
+        assert_eq!(channel.psk.len(), 44);
+    }
+
+    #[test]
+    fn test_channel_info_psk_mode_manual_invalid() {
+        let result: Result<ChannelInfo, _> = "psk_mode=manual:not-valid-base64!!!".parse();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_channel_info_psk_mode_manual_short() {
+        let result: Result<ChannelInfo, _> = "psk_mode=manual:MTIzNDU2".parse();
+        assert!(result.is_err());
     }
 }
