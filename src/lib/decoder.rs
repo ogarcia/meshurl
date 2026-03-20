@@ -128,4 +128,81 @@ mod tests {
         let result = decode_base64("CgsSAQ");
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_decode_url_empty_hash() {
+        let result = extract_hash("#");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "");
+    }
+
+    #[test]
+    fn test_decode_url_just_prefix() {
+        let url = "#CgsSAQEoATABOgIIDQoPEgEBGgZJYmVyaWEoATABChESAQEaCEFDb3J1w7FhKAEwARIWCAEY-gEgCygFOANABkgBUBtoAcAGAQ";
+        let result = decode_url(url);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_decode_url_with_short_channel_name() {
+        let url = "#CgsSAQEoATABOgIIDQoPEgEBGgZJYmVyaWEoATABChESAQEaCEFDb3J1w7FhKAEwARIWCAEY-gEgCygFOANABkgBUBtoAcAGAQ";
+        let result = decode_url(url);
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert!(!config.channels.is_empty());
+    }
+
+    #[test]
+    fn test_decode_url_multiple_channels() {
+        let url = "#CgsSAQEoATABOgIIDQoPEgEBGgZJYmVyaWEoATABChESAQEaCEFDb3J1w7FhKAEwARIWCAEY-gEgCygFOANABkgBUBtoAcAGAQ";
+        let result = decode_url(url);
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert!(config.channels.len() >= 1);
+    }
+
+    #[test]
+    fn test_decode_url_unicode_channel_name() {
+        let url = "#CgsSAQEoATABOgIIDQoPEgEBGgZJYmVyaWEoATABChESAQEaCEFDb3J1w7FhKAEwARIWCAEY-gEgCygFOANABkgBUBtoAcAGAQ";
+        let result = decode_url(url);
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert!(!config.channels.is_empty());
+    }
+
+    #[test]
+    fn test_extract_hash_various_formats() {
+        assert!(extract_hash("#abc").is_ok());
+        assert!(extract_hash("https://meshtastic.org/e/#abc").is_ok());
+        assert!(extract_hash("").is_err());
+        assert!(extract_hash("invalid").is_err());
+    }
+
+    #[test]
+    fn test_decode_base64_empty() {
+        let result = decode_base64("");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_decode_base64_padding() {
+        assert!(decode_base64("YWJj").is_ok());
+        assert!(decode_base64("YWJjZA").is_ok());
+        assert!(decode_base64("YWJjZGVm").is_ok());
+        assert!(decode_base64("YWJjZGVmZw").is_ok());
+    }
+
+    #[test]
+    fn test_decode_base64_special_chars() {
+        assert!(decode_base64("YWJj").is_ok());
+        assert!(decode_base64("AQIDBA").is_ok());
+        assert!(decode_base64("YWJjZGVmZw").is_ok());
+    }
+
+    #[test]
+    fn test_extract_hash_no_hash_returns_error() {
+        assert!(extract_hash("https://example.com").is_err());
+        assert!(extract_hash("just text").is_err());
+    }
 }

@@ -228,4 +228,232 @@ mod tests {
         assert_eq!(modem_preset_from_str("ShortTurbo"), ModemPreset::ShortTurbo);
         assert_eq!(modem_preset_from_str("unknown"), ModemPreset::LongFast);
     }
+
+    #[test]
+    fn test_encode_decode_roundtrip_all_modem_presets() {
+        use meshtastic_protobufs::meshtastic::config::lo_ra_config::ModemPreset;
+
+        let presets = [
+            ModemPreset::LongFast,
+            ModemPreset::LongSlow,
+            ModemPreset::VeryLongSlow,
+            ModemPreset::MediumSlow,
+            ModemPreset::MediumFast,
+            ModemPreset::ShortSlow,
+            ModemPreset::ShortFast,
+            ModemPreset::LongModerate,
+            ModemPreset::ShortTurbo,
+        ];
+
+        for preset in presets {
+            let mut config = MeshtasticConfig::new();
+            let channel = ChannelInfo {
+                index: 0,
+                role: ChannelRole::Primary,
+                name: "Test".to_string(),
+                psk: DEFAULT_PSK.to_string(),
+                psk_type: PskType::Default,
+                uplink_enabled: true,
+                downlink_enabled: true,
+                position_precision: None,
+                is_client_muted: false,
+            };
+            config.channels.push(channel);
+
+            let lora = LoRaInfo {
+                region: RegionCode::Us,
+                modem_preset: preset,
+                use_preset: true,
+                tx_enabled: true,
+                tx_power: 0,
+                bandwidth: 250,
+                spread_factor: 11,
+                coding_rate: 5,
+                hop_limit: 3,
+                channel_num: 0,
+                override_duty_cycle: false,
+                sx126x_rx_boosted_gain: false,
+                override_frequency: 0.0,
+                frequency_offset: 0.0,
+                pa_fan_disabled: false,
+                ignore_mqtt: true,
+                config_ok_to_mqtt: false,
+                ignore_incoming: Vec::new(),
+            };
+            config.lora = Some(lora);
+
+            let encoded = encode_url_short(&config).unwrap();
+            let decoded = crate::decoder::decode_url(&encoded).unwrap();
+            assert!(decoded.lora.is_some(), "Failed for preset {:?}", preset);
+        }
+    }
+
+    #[test]
+    fn test_encode_decode_roundtrip_all_regions() {
+        use meshtastic_protobufs::meshtastic::config::lo_ra_config::RegionCode;
+
+        let regions = [
+            RegionCode::Us,
+            RegionCode::Eu433,
+            RegionCode::Eu868,
+            RegionCode::Cn,
+            RegionCode::Jp,
+            RegionCode::Anz,
+            RegionCode::Kr,
+            RegionCode::Tw,
+            RegionCode::Ru,
+            RegionCode::In,
+            RegionCode::Nz865,
+            RegionCode::Th,
+            RegionCode::Lora24,
+            RegionCode::Ua433,
+            RegionCode::Ua868,
+        ];
+
+        for region in regions {
+            let mut config = MeshtasticConfig::new();
+            let channel = ChannelInfo {
+                index: 0,
+                role: ChannelRole::Primary,
+                name: "Test".to_string(),
+                psk: DEFAULT_PSK.to_string(),
+                psk_type: PskType::Default,
+                uplink_enabled: true,
+                downlink_enabled: true,
+                position_precision: None,
+                is_client_muted: false,
+            };
+            config.channels.push(channel);
+
+            let lora = LoRaInfo {
+                region,
+                modem_preset: ModemPreset::LongFast,
+                use_preset: true,
+                tx_enabled: true,
+                tx_power: 0,
+                bandwidth: 250,
+                spread_factor: 11,
+                coding_rate: 5,
+                hop_limit: 3,
+                channel_num: 0,
+                override_duty_cycle: false,
+                sx126x_rx_boosted_gain: false,
+                override_frequency: 0.0,
+                frequency_offset: 0.0,
+                pa_fan_disabled: false,
+                ignore_mqtt: true,
+                config_ok_to_mqtt: false,
+                ignore_incoming: Vec::new(),
+            };
+            config.lora = Some(lora);
+
+            let encoded = encode_url_short(&config).unwrap();
+            let decoded = crate::decoder::decode_url(&encoded).unwrap();
+            assert!(decoded.lora.is_some(), "Failed for region {:?}", region);
+        }
+    }
+
+    #[test]
+    fn test_encode_multiple_channels() {
+        let mut config = MeshtasticConfig::new();
+
+        let channel1 = ChannelInfo {
+            index: 0,
+            role: ChannelRole::Primary,
+            name: "Primary".to_string(),
+            psk: DEFAULT_PSK.to_string(),
+            psk_type: PskType::Default,
+            uplink_enabled: true,
+            downlink_enabled: true,
+            position_precision: None,
+            is_client_muted: false,
+        };
+        config.channels.push(channel1);
+
+        let channel2 = ChannelInfo {
+            index: 1,
+            role: ChannelRole::Secondary,
+            name: "Secondary".to_string(),
+            psk: "AQ==".to_string(),
+            psk_type: PskType::Aes128,
+            uplink_enabled: false,
+            downlink_enabled: true,
+            position_precision: None,
+            is_client_muted: false,
+        };
+        config.channels.push(channel2);
+
+        let encoded = encode_url_short(&config).unwrap();
+        let decoded = crate::decoder::decode_url(&encoded).unwrap();
+
+        assert_eq!(decoded.channels.len(), 2);
+        assert_eq!(decoded.channels[0].name, "Primary");
+        assert_eq!(decoded.channels[1].name, "Secondary");
+    }
+
+    #[test]
+    fn test_encode_channel_with_position_precision() {
+        let mut config = MeshtasticConfig::new();
+
+        let channel = ChannelInfo {
+            index: 0,
+            role: ChannelRole::Primary,
+            name: "Test".to_string(),
+            psk: DEFAULT_PSK.to_string(),
+            psk_type: PskType::Default,
+            uplink_enabled: true,
+            downlink_enabled: true,
+            position_precision: Some(10),
+            is_client_muted: false,
+        };
+        config.channels.push(channel);
+
+        let encoded = encode_url_short(&config).unwrap();
+        let decoded = crate::decoder::decode_url(&encoded).unwrap();
+
+        assert_eq!(decoded.channels.len(), 1);
+    }
+
+    #[test]
+    fn test_encode_tx_disabled() {
+        let mut config = MeshtasticConfig::new();
+        let channel = ChannelInfo {
+            index: 0,
+            role: ChannelRole::Primary,
+            name: "Test".to_string(),
+            psk: DEFAULT_PSK.to_string(),
+            psk_type: PskType::Default,
+            uplink_enabled: true,
+            downlink_enabled: true,
+            position_precision: None,
+            is_client_muted: false,
+        };
+        config.channels.push(channel);
+
+        let lora = LoRaInfo {
+            region: RegionCode::Us,
+            modem_preset: ModemPreset::LongFast,
+            use_preset: true,
+            tx_enabled: false,
+            tx_power: 0,
+            bandwidth: 250,
+            spread_factor: 11,
+            coding_rate: 5,
+            hop_limit: 3,
+            channel_num: 0,
+            override_duty_cycle: false,
+            sx126x_rx_boosted_gain: false,
+            override_frequency: 0.0,
+            frequency_offset: 0.0,
+            pa_fan_disabled: false,
+            ignore_mqtt: true,
+            config_ok_to_mqtt: false,
+            ignore_incoming: Vec::new(),
+        };
+        config.lora = Some(lora);
+
+        let encoded = encode_url_short(&config).unwrap();
+        let decoded = crate::decoder::decode_url(&encoded).unwrap();
+        assert!(decoded.lora.is_some());
+    }
 }

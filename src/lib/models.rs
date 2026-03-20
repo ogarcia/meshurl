@@ -624,4 +624,117 @@ mod tests {
         let decoded = STANDARD.decode(&psk1).unwrap();
         assert_eq!(decoded.len(), 32);
     }
+
+    #[test]
+    fn test_psk_mode_is_none() {
+        assert!(PskMode::None.is_none());
+        assert!(!PskMode::Default.is_none());
+        assert!(!PskMode::Random.is_none());
+        assert!(!PskMode::Base64("abc".to_string()).is_none());
+        assert!(!PskMode::Passphrase("phrase".to_string()).is_none());
+    }
+
+    #[test]
+    fn test_psk_mode_default_parsing() {
+        let channel: ChannelInfo = "psk_mode=default".parse().unwrap();
+        assert_eq!(channel.psk_type, PskType::Default);
+        assert_eq!(channel.psk, DEFAULT_PSK);
+    }
+
+    #[test]
+    fn test_psk_mode_none_parsing() {
+        let channel: ChannelInfo = "psk_mode=none".parse().unwrap();
+        assert_eq!(channel.psk_type, PskType::None);
+        assert_eq!(channel.psk, "");
+    }
+
+    #[test]
+    fn test_psk_mode_random_parsing() {
+        let channel: ChannelInfo = "psk_mode=random".parse().unwrap();
+        assert_eq!(channel.psk_type, PskType::Aes256);
+        assert!(!channel.psk.is_empty());
+    }
+
+    #[test]
+    fn test_psk_type_variants() {
+        assert_eq!(PskType::Default, PskType::Default);
+        assert_eq!(PskType::None, PskType::None);
+        assert_eq!(PskType::Simple(1), PskType::Simple(1));
+        assert_ne!(PskType::Simple(1), PskType::Simple(2));
+        assert_eq!(PskType::Aes128, PskType::Aes128);
+        assert_eq!(PskType::Aes256, PskType::Aes256);
+        assert_eq!(PskType::Unknown, PskType::Unknown);
+    }
+
+    #[test]
+    fn test_channel_role_variants() {
+        assert_eq!(ChannelRole::Primary, ChannelRole::Primary);
+        assert_eq!(ChannelRole::Secondary, ChannelRole::Secondary);
+        assert_ne!(ChannelRole::Primary, ChannelRole::Secondary);
+    }
+
+    #[test]
+    fn test_channel_info_with_position_precision() {
+        let channel: ChannelInfo = "n=TestChannel,pos=3".parse().unwrap();
+        assert_eq!(channel.name, "TestChannel");
+        assert_eq!(channel.position_precision, Some(3));
+    }
+
+    #[test]
+    fn test_channel_info_with_uplink_downlink() {
+        let channel: ChannelInfo = "n=TestChannel,up,down".parse().unwrap();
+        assert!(channel.uplink_enabled);
+        assert!(channel.downlink_enabled);
+    }
+
+    #[test]
+    fn test_channel_info_with_client_muted() {
+        let channel: ChannelInfo = "n=TestChannel,muted".parse().unwrap();
+        assert!(channel.is_client_muted);
+    }
+
+    #[test]
+    fn test_channel_info_role_primary() {
+        let channel: ChannelInfo = "n=Test".parse().unwrap();
+        assert_eq!(channel.role, ChannelRole::Primary);
+    }
+
+    #[test]
+    fn test_channel_info_role_secondary() {
+        let channel: ChannelInfo = "n=Test".parse().unwrap();
+        assert_eq!(channel.role, ChannelRole::Primary);
+    }
+
+    #[test]
+    fn test_channel_info_full_config() {
+        let channel: ChannelInfo = "n=Test,up,down,pos=5,muted,psk_mode=random"
+            .parse()
+            .unwrap();
+        assert_eq!(channel.name, "Test");
+        assert_eq!(channel.role, ChannelRole::Primary);
+        assert!(channel.uplink_enabled);
+        assert!(channel.downlink_enabled);
+        assert_eq!(channel.position_precision, Some(5));
+        assert!(channel.is_client_muted);
+        assert_eq!(channel.psk_type, PskType::Aes256);
+    }
+
+    #[test]
+    fn test_channel_info_role_case_insensitive() {
+        let channel1: ChannelInfo = "n=Test,psk_mode=default".parse().unwrap();
+        let channel2: ChannelInfo = "n=Test,mode=default".parse().unwrap();
+        assert_eq!(channel1.psk_type, channel2.psk_type);
+    }
+
+    #[test]
+    fn test_psk_mode_unknown() {
+        let result: Result<ChannelInfo, _> = "psk_mode=unknown_mode".parse();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_channel_info_with_special_chars_in_name() {
+        let channel: ChannelInfo = "n=Test_Channel-123".parse().unwrap();
+        assert_eq!(channel.name, "Test_Channel-123");
+    }
 }

@@ -41,3 +41,61 @@ impl fmt::Display for EncodeError {
 }
 
 impl std::error::Error for EncodeError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error;
+
+    #[test]
+    fn test_decode_error_display_invalid_url() {
+        let err = DecodeError::InvalidUrl("missing hash".to_string());
+        assert_eq!(format!("{}", err), "Invalid URL: missing hash");
+    }
+
+    #[test]
+    fn test_decode_error_display_base64() {
+        let err = DecodeError::Base64Decode("invalid padding".to_string());
+        assert_eq!(format!("{}", err), "Base64 decode error: invalid padding");
+    }
+
+    #[test]
+    fn test_decode_error_display_protobuf() {
+        let err = DecodeError::ProtobufDecode("truncated data".to_string());
+        assert_eq!(format!("{}", err), "Protobuf decode error: truncated data");
+    }
+
+    #[test]
+    fn test_encode_error_display() {
+        let err = EncodeError::ProtobufEncode("encoding failed".to_string());
+        assert_eq!(format!("{}", err), "Protobuf encode error: encoding failed");
+    }
+
+    #[test]
+    fn test_decode_error_debug() {
+        let err = DecodeError::InvalidUrl("test".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("InvalidUrl"));
+        assert!(debug.contains("test"));
+    }
+
+    #[test]
+    fn test_encode_error_debug() {
+        let err = EncodeError::ProtobufEncode("test".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("ProtobufEncode"));
+        assert!(debug.contains("test"));
+    }
+
+    #[test]
+    fn test_decode_error_source() {
+        let err = DecodeError::InvalidUrl("test".to_string());
+        assert!(err.source().is_none());
+    }
+
+    #[test]
+    fn test_encode_error_source() {
+        let err = EncodeError::ProtobufEncode("test".to_string());
+        assert!(err.source().is_none());
+    }
+}
