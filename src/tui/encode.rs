@@ -2,7 +2,7 @@ use base64::Engine;
 use meshurl::encoder::{encode_url, modem_preset_from_str, region_code_from_str};
 use meshurl::models::{
     generate_random_psk, get_preset_params, hash_phrase_to_psk, ChannelInfo, ChannelRole, LoRaInfo,
-    MeshtasticConfig, PskMode, PskType, DEFAULT_PSK, POSITION_OPTIONS,
+    PskMode, PskType, DEFAULT_PSK, POSITION_OPTIONS,
 };
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
@@ -15,7 +15,7 @@ use ratatui_textarea::{CursorMove, TextArea};
 use std::io::Write;
 use std::process::Command;
 
-use crate::tui::app::{ActivePanel, EncodeState};
+use crate::tui::app::{ActivePanel, EncodeDrawState, EncodeState};
 use crate::tui::widgets::{
     channel_list_item, channel_scroll_indicator, channel_total_lines, lora_info_lines,
     lora_scroll_info,
@@ -330,16 +330,7 @@ fn get_popup_fields(psk_mode: &PskMode) -> Vec<&'static str> {
     fields
 }
 
-pub fn draw_encode_mode(
-    f: &mut Frame,
-    encode_config: &MeshtasticConfig,
-    encoded_url: &Option<String>,
-    active_panel: ActivePanel,
-    encode_channels_state: &mut ListState,
-    lora_popup: &Option<LoRaPopupState>,
-    lora_scroll: u16,
-    lora_max_scroll: &mut u16,
-) {
+pub fn draw_encode_mode(f: &mut Frame, state: &mut EncodeDrawState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -365,11 +356,14 @@ pub fn draw_encode_mode(
         );
     f.render_widget(title, chunks[0]);
 
-    let channels_title = format!(" 📋 Channels ({} found) ", encode_config.channels.len());
+    let channels_title = format!(
+        " 📋 Channels ({} found) ",
+        state.encode_config.channels.len()
+    );
 
-    let total_lines = channel_total_lines(&encode_config.channels);
+    let total_lines = channel_total_lines(&state.encode_config.channels);
     let block_height = chunks[1].height;
-    let selected_idx = encode_channels_state.selected().unwrap_or(0);
+    let selected_idx = state.encode_channels_state.selected().unwrap_or(0);
 
     let channels_scroll_indicator = channel_scroll_indicator(
         total_lines,
@@ -384,19 +378,20 @@ pub fn draw_encode_mode(
         .title_bottom(Line::from(channels_scroll_indicator).right_aligned())
         .borders(Borders::ALL)
         .padding(Padding::new(1, 1, 1, 1))
-        .border_style(if active_panel == ActivePanel::Channels {
+        .border_style(if state.active_panel == ActivePanel::Channels {
             Style::default().fg(Color::Yellow)
         } else {
             Style::default().fg(Color::DarkGray)
         });
 
-    if encode_config.channels.is_empty() {
+    if state.encode_config.channels.is_empty() {
         let help = Paragraph::new("No channels. Press [A] to add a channel")
             .style(Style::default().fg(Color::DarkGray))
             .block(channels_block);
         f.render_widget(help, chunks[1]);
     } else {
-        let items: Vec<ListItem> = encode_config
+        let items: Vec<ListItem> = state
+            .encode_config
             .channels
             .iter()
             .enumerate()
@@ -408,14 +403,14 @@ pub fn draw_encode_mode(
                 .bg(Color::Rgb(0x1a, 0x1a, 0x1a))
                 .add_modifier(ratatui::style::Modifier::BOLD),
         );
-        f.render_stateful_widget(list, chunks[1], encode_channels_state);
+        f.render_stateful_widget(list, chunks[1], state.encode_channels_state);
     }
 
     let lora_title = " 📻 LoRa Config ";
 
-    if let Some(lora) = &encode_config.lora {
-        let scroll_info = lora_scroll_info(lora, chunks[2].height, lora_scroll);
-        *lora_max_scroll = scroll_info.max_scroll;
+    if let Some(lora) = &state.encode_config.lora {
+        let scroll_info = lora_scroll_info(lora, chunks[2].height, state.lora_scroll);
+        *state.lora_max_scroll = scroll_info.max_scroll;
 
         let all_lines = lora_info_lines(lora);
 
@@ -434,7 +429,7 @@ pub fn draw_encode_mode(
             .title_bottom(Line::from(scroll_info.indicator).right_aligned())
             .borders(Borders::ALL)
             .padding(Padding::new(1, 1, 1, 1))
-            .border_style(if active_panel == ActivePanel::Lora {
+            .border_style(if state.active_panel == ActivePanel::Lora {
                 Style::default().fg(Color::Yellow)
             } else {
                 Style::default().fg(Color::DarkGray)
@@ -447,7 +442,7 @@ pub fn draw_encode_mode(
             .title(lora_title)
             .borders(Borders::ALL)
             .padding(Padding::new(1, 1, 1, 1))
-            .border_style(if active_panel == ActivePanel::Lora {
+            .border_style(if state.active_panel == ActivePanel::Lora {
                 Style::default().fg(Color::Yellow)
             } else {
                 Style::default().fg(Color::DarkGray)
@@ -459,8 +454,11 @@ pub fn draw_encode_mode(
     }
 
     let url_title = " 🔗 Generated URL ";
-    let url_text = encoded_url.as_deref().unwrap_or("(Press G to generate)");
-    let url_style = if encoded_url.is_some() {
+    let url_text = state
+        .encoded_url
+        .as_deref()
+        .unwrap_or("(Press G to generate)");
+    let url_style = if state.encoded_url.is_some() {
         Style::default().fg(Color::Green)
     } else {
         Style::default().fg(Color::DarkGray)
@@ -470,7 +468,7 @@ pub fn draw_encode_mode(
             .title(url_title)
             .borders(Borders::ALL)
             .padding(Padding::new(1, 1, 0, 0))
-            .border_style(if active_panel == ActivePanel::UrlEncode {
+            .border_style(if state.active_panel == ActivePanel::UrlEncode {
                 Style::default().fg(Color::Yellow)
             } else {
                 Style::default().fg(Color::DarkGray)
@@ -478,15 +476,15 @@ pub fn draw_encode_mode(
     );
     f.render_widget(url_para, chunks[3]);
 
-    let copy_hint = if encoded_url.is_some() {
+    let copy_hint = if state.encoded_url.is_some() {
         "  [C] Copy"
     } else {
         ""
     };
 
-    let can_reorder = encode_config.channels.len() >= 2;
+    let can_reorder = state.encode_config.channels.len() >= 2;
     let reorder_hint = if can_reorder { " [+]/[-] Move" } else { "" };
-    let footer_text = match active_panel {
+    let footer_text = match state.active_panel {
         ActivePanel::Channels => format!("[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [D] Delete{}  [E] LoRa  [G] Generate{}  [Del] Clear", reorder_hint, copy_hint),
         ActivePanel::Lora => format!("[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [E] LoRa  [G] Generate{}  [Del] Clear", copy_hint),
         ActivePanel::UrlEncode => format!("[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [E] LoRa  [G] Generate{}  [Del] Clear", copy_hint),
@@ -495,7 +493,7 @@ pub fn draw_encode_mode(
     let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::DarkGray));
     f.render_widget(footer, chunks[4]);
 
-    if let Some(lora_state) = lora_popup {
+    if let Some(lora_state) = state.lora_popup {
         draw_lora_popup(f, lora_state, f.area());
     }
 }

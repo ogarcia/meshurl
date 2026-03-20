@@ -1,5 +1,4 @@
 use meshurl::decoder::decode_url;
-use meshurl::models::MeshtasticConfig;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Style},
@@ -9,23 +8,13 @@ use ratatui::{
 };
 use ratatui_textarea::TextArea;
 
-use crate::tui::app::{ActivePanel, DecodeState};
+use crate::tui::app::{ActivePanel, DecodeDrawState, DecodeState};
 use crate::tui::widgets::{
     channel_list_item, channel_scroll_indicator, channel_total_lines, lora_info_lines,
     lora_scroll_info,
 };
 
-pub fn draw_decode_mode(
-    f: &mut Frame,
-    textarea: &TextArea,
-    config_result: &Option<Result<MeshtasticConfig, String>>,
-    active_panel: ActivePanel,
-    editing_url: bool,
-    channels_scroll: usize,
-    channels_list_state: &mut ListState,
-    lora_scroll: u16,
-    lora_max_scroll: &mut u16,
-) {
+pub fn draw_decode_mode(f: &mut Frame, state: &mut DecodeDrawState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -51,8 +40,8 @@ pub fn draw_decode_mode(
         );
     f.render_widget(title, chunks[0]);
 
-    let border_color = if active_panel == ActivePanel::Url {
-        if editing_url {
+    let border_color = if state.active_panel == ActivePanel::Url {
+        if state.editing_url {
             Color::Green
         } else {
             Color::Yellow
@@ -67,8 +56,8 @@ pub fn draw_decode_mode(
         .padding(Padding::new(1, 1, 0, 0))
         .border_style(Style::default().fg(border_color));
 
-    if active_panel == ActivePanel::Url && editing_url {
-        let mut text_area_edit = textarea.clone();
+    if state.active_panel == ActivePanel::Url && state.editing_url {
+        let mut text_area_edit = state.textarea.clone();
         text_area_edit.set_cursor_line_style(Style::default());
         text_area_edit.set_block(
             Block::default()
@@ -79,7 +68,7 @@ pub fn draw_decode_mode(
         );
         f.render_widget(&text_area_edit, chunks[1]);
     } else {
-        let text = textarea.lines().first().map_or("", |l| l.as_str());
+        let text = state.textarea.lines().first().map_or("", |l| l.as_str());
         let placeholder = "Paste URL here...";
         let display_text = if text.is_empty() { placeholder } else { text };
         let text_style = if text.is_empty() {
@@ -94,18 +83,18 @@ pub fn draw_decode_mode(
         f.render_widget(url_para, chunks[1]);
     }
 
-    let channels_title = match config_result {
+    let channels_title = match state.config_result {
         Some(Ok(config)) => format!(" 📋 Channels ({} found) ", config.channels.len()),
         Some(Err(_)) => " 📋 Channels (error) ".to_string(),
         None => " 📋 Channels ".to_string(),
     };
-    let channels_border_color = if active_panel == ActivePanel::Channels {
+    let channels_border_color = if state.active_panel == ActivePanel::Channels {
         Color::Yellow
     } else {
         Color::DarkGray
     };
 
-    match config_result {
+    match state.config_result {
         Some(Ok(config)) => {
             let items: Vec<ListItem> = config
                 .channels
@@ -116,14 +105,14 @@ pub fn draw_decode_mode(
 
             let total_lines = channel_total_lines(&config.channels);
             let block_height = chunks[2].height;
-            let selected_idx = channels_list_state.selected().unwrap_or(0);
+            let selected_idx = state.channels_list_state.selected().unwrap_or(0);
 
             let scroll_indicator = channel_scroll_indicator(
                 total_lines,
                 block_height,
                 selected_idx,
                 true, // has scroll state in decode
-                channels_scroll,
+                state.channels_scroll,
             );
 
             let channels_block = Block::default()
@@ -134,15 +123,15 @@ pub fn draw_decode_mode(
                 .border_style(Style::default().fg(channels_border_color));
 
             let list = List::new(items).block(channels_block.clone());
-            if active_panel == ActivePanel::Channels {
+            if state.active_panel == ActivePanel::Channels {
                 let list = list.highlight_style(
                     Style::default()
                         .bg(Color::Rgb(0x1a, 0x1a, 0x1a))
                         .add_modifier(ratatui::style::Modifier::BOLD),
                 );
-                f.render_stateful_widget(list, chunks[2], channels_list_state);
+                f.render_stateful_widget(list, chunks[2], state.channels_list_state);
             } else {
-                f.render_stateful_widget(list, chunks[2], channels_list_state);
+                f.render_stateful_widget(list, chunks[2], state.channels_list_state);
             }
         }
 
@@ -172,11 +161,11 @@ pub fn draw_decode_mode(
 
     let lora_title = " 📻 LoRa Config ";
 
-    match config_result {
+    match state.config_result {
         Some(Ok(config)) => {
             if let Some(lora) = &config.lora {
-                let scroll_info = lora_scroll_info(lora, chunks[3].height, lora_scroll);
-                *lora_max_scroll = scroll_info.max_scroll;
+                let scroll_info = lora_scroll_info(lora, chunks[3].height, state.lora_scroll);
+                *state.lora_max_scroll = scroll_info.max_scroll;
 
                 let all_lines = lora_info_lines(lora);
                 let start_idx = scroll_info.clamped_scroll as usize;
@@ -184,7 +173,7 @@ pub fn draw_decode_mode(
                 let visible_lines: Vec<Line> =
                     all_lines[start_idx..end_idx].iter().cloned().collect();
 
-                let lora_border_color = if active_panel == ActivePanel::Lora {
+                let lora_border_color = if state.active_panel == ActivePanel::Lora {
                     Color::Yellow
                 } else {
                     Color::DarkGray
@@ -200,7 +189,7 @@ pub fn draw_decode_mode(
                 let lora_para = Paragraph::new(visible_lines).block(lora_block);
                 f.render_widget(lora_para, chunks[3]);
             } else {
-                let lora_border_color = if active_panel == ActivePanel::Lora {
+                let lora_border_color = if state.active_panel == ActivePanel::Lora {
                     Color::Yellow
                 } else {
                     Color::DarkGray
@@ -217,7 +206,7 @@ pub fn draw_decode_mode(
             }
         }
         _ => {
-            let lora_border_color = if active_panel == ActivePanel::Lora {
+            let lora_border_color = if state.active_panel == ActivePanel::Lora {
                 Color::Yellow
             } else {
                 Color::DarkGray
@@ -234,11 +223,11 @@ pub fn draw_decode_mode(
         }
     }
 
-    let has_valid_config = matches!(config_result, Some(Ok(_)));
+    let has_valid_config = matches!(state.config_result, Some(Ok(_)));
 
-    let footer_text = match active_panel {
+    let footer_text = match state.active_panel {
         ActivePanel::Url => {
-            if editing_url {
+            if state.editing_url {
                 "[1] Decode  [2] Encode  [Enter] Decode  [Esc] Exit edit"
             } else if has_valid_config {
                 "[1] Decode  [2] Encode  [M] Modify  [Enter] Edit  [Del] Clear  [Esc] Quit"

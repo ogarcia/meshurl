@@ -77,6 +77,27 @@ pub struct EncodeState<'a> {
     pub toast_timer: &'a mut u8,
 }
 
+pub struct DecodeDrawState<'a> {
+    pub textarea: &'a TextArea<'static>,
+    pub config_result: &'a Option<Result<MeshtasticConfig, String>>,
+    pub active_panel: ActivePanel,
+    pub editing_url: bool,
+    pub channels_scroll: usize,
+    pub channels_list_state: &'a mut ListState,
+    pub lora_scroll: u16,
+    pub lora_max_scroll: &'a mut u16,
+}
+
+pub struct EncodeDrawState<'a> {
+    pub encode_config: &'a MeshtasticConfig,
+    pub encoded_url: &'a Option<String>,
+    pub active_panel: ActivePanel,
+    pub encode_channels_state: &'a mut ListState,
+    pub lora_popup: &'a Option<crate::tui::encode::LoRaPopupState>,
+    pub lora_scroll: u16,
+    pub lora_max_scroll: &'a mut u16,
+}
+
 impl Default for AppState {
     fn default() -> Self {
         Self {
@@ -288,16 +309,16 @@ fn run_inner(
 
 fn draw(f: &mut Frame, state: &mut AppState) {
     if state.app_mode == AppMode::Encode {
-        crate::tui::encode::draw_encode_mode(
-            f,
-            &state.encode_config,
-            &state.encoded_url,
-            state.active_panel,
-            &mut state.encode_channels_state,
-            &state.lora_popup,
-            state.lora_scroll,
-            &mut state.lora_max_scroll,
-        );
+        let mut encode_draw_state = EncodeDrawState {
+            encode_config: &state.encode_config,
+            encoded_url: &state.encoded_url,
+            active_panel: state.active_panel,
+            encode_channels_state: &mut state.encode_channels_state,
+            lora_popup: &state.lora_popup,
+            lora_scroll: state.lora_scroll,
+            lora_max_scroll: &mut state.lora_max_scroll,
+        };
+        crate::tui::encode::draw_encode_mode(f, &mut encode_draw_state);
 
         if let Some(popup_state) = &state.channel_popup {
             crate::tui::encode::draw_channel_popup(f, popup_state);
@@ -328,17 +349,17 @@ fn draw(f: &mut Frame, state: &mut AppState) {
         return;
     }
 
-    crate::tui::decode::draw_decode_mode(
-        f,
-        &state.textarea,
-        &state.config_result,
-        state.active_panel,
-        state.editing_url,
-        state.channels_scroll,
-        &mut state.channels_list_state,
-        state.lora_scroll,
-        &mut state.lora_max_scroll,
-    );
+    let mut decode_draw_state = DecodeDrawState {
+        textarea: &state.textarea,
+        config_result: &state.config_result,
+        active_panel: state.active_panel,
+        editing_url: state.editing_url,
+        channels_scroll: state.channels_scroll,
+        channels_list_state: &mut state.channels_list_state,
+        lora_scroll: state.lora_scroll,
+        lora_max_scroll: &mut state.lora_max_scroll,
+    };
+    crate::tui::decode::draw_decode_mode(f, &mut decode_draw_state);
 
     if let Some(toast) = &state.toast {
         let color = if toast.is_uncertain {
