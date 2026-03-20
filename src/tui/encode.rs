@@ -664,65 +664,73 @@ pub fn handle_encode_keys(
             true
         }
         KeyCode::Enter => {
-            if let Some(selected) = state.encode_channels_state.selected() {
-                if selected < state.encode_config.channels.len() {
-                    let channel = &state.encode_config.channels[selected];
-                    *state.channel_popup = Some(ChannelPopupState::from_channel(selected, channel));
-                }
+            if let Some(selected) = state
+                .encode_channels_state
+                .selected()
+                .and_then(|s| (s < state.encode_config.channels.len()).then_some(s))
+            {
+                let channel = &state.encode_config.channels[selected];
+                *state.channel_popup = Some(ChannelPopupState::from_channel(selected, channel));
             }
             true
         }
         KeyCode::Char('+') => {
-            if let Some(idx) = state.encode_channels_state.selected() {
-                if idx < state.encode_config.channels.len() - 1 {
-                    state.encode_config.channels.swap(idx, idx + 1);
-                    for (i, ch) in state.encode_config.channels.iter_mut().enumerate() {
-                        ch.role = if i == 0 {
-                            ChannelRole::Primary
-                        } else {
-                            ChannelRole::Secondary
-                        };
-                    }
-                    state.encode_channels_state.select(Some(idx + 1));
+            if let Some(idx) = state
+                .encode_channels_state
+                .selected()
+                .and_then(|s| (s < state.encode_config.channels.len() - 1).then_some(s))
+            {
+                state.encode_config.channels.swap(idx, idx + 1);
+                for (i, ch) in state.encode_config.channels.iter_mut().enumerate() {
+                    ch.role = if i == 0 {
+                        ChannelRole::Primary
+                    } else {
+                        ChannelRole::Secondary
+                    };
                 }
+                state.encode_channels_state.select(Some(idx + 1));
             }
             false
         }
         KeyCode::Char('-') => {
-            if let Some(idx) = state.encode_channels_state.selected() {
-                if idx > 0 {
-                    state.encode_config.channels.swap(idx, idx - 1);
-                    for (i, ch) in state.encode_config.channels.iter_mut().enumerate() {
-                        ch.role = if i == 0 {
-                            ChannelRole::Primary
-                        } else {
-                            ChannelRole::Secondary
-                        };
-                    }
-                    state.encode_channels_state.select(Some(idx - 1));
+            if let Some(idx) = state
+                .encode_channels_state
+                .selected()
+                .and_then(|s| (s > 0).then_some(s))
+            {
+                state.encode_config.channels.swap(idx, idx - 1);
+                for (i, ch) in state.encode_config.channels.iter_mut().enumerate() {
+                    ch.role = if i == 0 {
+                        ChannelRole::Primary
+                    } else {
+                        ChannelRole::Secondary
+                    };
                 }
+                state.encode_channels_state.select(Some(idx - 1));
             }
             false
         }
         KeyCode::Char('d') | KeyCode::Char('D') => {
-            if let Some(selected) = state.encode_channels_state.selected() {
-                if selected < state.encode_config.channels.len() {
-                    state.encode_config.channels.remove(selected);
-                    for (i, channel) in state.encode_config.channels.iter_mut().enumerate() {
-                        channel.index = i;
-                        channel.role = if i == 0 {
-                            ChannelRole::Primary
-                        } else {
-                            ChannelRole::Secondary
-                        };
-                    }
-                    if state.encode_config.channels.is_empty() {
-                        state.encode_channels_state.select(None);
-                    } else if selected >= state.encode_config.channels.len() {
-                        state
-                            .encode_channels_state
-                            .select(Some(state.encode_config.channels.len() - 1));
-                    }
+            if let Some(selected) = state
+                .encode_channels_state
+                .selected()
+                .and_then(|s| (s < state.encode_config.channels.len()).then_some(s))
+            {
+                state.encode_config.channels.remove(selected);
+                for (i, channel) in state.encode_config.channels.iter_mut().enumerate() {
+                    channel.index = i;
+                    channel.role = if i == 0 {
+                        ChannelRole::Primary
+                    } else {
+                        ChannelRole::Secondary
+                    };
+                }
+                if state.encode_config.channels.is_empty() {
+                    state.encode_channels_state.select(None);
+                } else if selected >= state.encode_config.channels.len() {
+                    state
+                        .encode_channels_state
+                        .select(Some(state.encode_config.channels.len() - 1));
                 }
             }
             false

@@ -158,8 +158,11 @@ fn run_inner(
         }
 
         if event::poll(std::time::Duration::from_millis(16))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
+            let Event::Key(key) = event::read()? else {
+                continue;
+            };
+            if key.kind == KeyEventKind::Press {
+                {
                     let is_editing_in_url =
                         state.active_panel == ActivePanel::Url && state.editing_url;
                     let is_decode_mode = state.app_mode == AppMode::Decode;
@@ -199,15 +202,14 @@ fn run_inner(
                                     state.active_panel = ActivePanel::Channels;
                                 }
                                 KeyCode::Char('m') | KeyCode::Char('M') => {
-                                    if state.app_mode == AppMode::Decode
-                                        && matches!(&state.config_result, Some(Ok(_)))
-                                    {
-                                        if let Some(Ok(config)) = state.config_result.clone() {
+                                    match state.config_result.clone() {
+                                        Some(Ok(config)) if state.app_mode == AppMode::Decode => {
                                             state.encode_config = config;
                                             state.app_mode = AppMode::Encode;
                                             state.active_panel = ActivePanel::Channels;
                                             state.encode_channels_state.select(Some(0));
                                         }
+                                        _ => {}
                                     }
                                 }
                                 KeyCode::Tab | KeyCode::BackTab => {
