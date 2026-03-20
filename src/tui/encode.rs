@@ -863,13 +863,7 @@ pub fn draw_channel_popup(f: &mut Frame, state: &ChannelPopupState) {
                     }
                 }
             }
-            "PSK Mode" => match &state.psk_mode {
-                PskMode::Default => "Default".to_string(),
-                PskMode::None => "None".to_string(),
-                PskMode::Random => "Random".to_string(),
-                PskMode::Base64(_) => "Base64".to_string(),
-                PskMode::Passphrase(_) => "Passphrase".to_string(),
-            },
+            "PSK Mode" => state.psk_mode.to_string(),
             "PSK" => {
                 let max_len = 22;
                 if state.psk_value.len() > max_len {

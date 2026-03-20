@@ -4,11 +4,15 @@ use meshtastic_protobufs::meshtastic::config::{
 };
 use meshtastic_protobufs::meshtastic::{ChannelSettings, ModuleSettings};
 
+/// Provides consistent string representation for Meshtastic enums.
+/// Converts protobuf enum variants to standardized uppercase string format.
 pub trait MeshtasticDisplay {
+    /// Returns the standardized string representation.
     fn to_mesh_string(&self) -> &'static str;
 }
 
 impl MeshtasticDisplay for RegionCode {
+    /// Converts RegionCode to uppercase string (e.g., "US", "EU868", "CN").
     fn to_mesh_string(&self) -> &'static str {
         match self {
             RegionCode::Unset => "Unset",
@@ -39,6 +43,7 @@ impl MeshtasticDisplay for RegionCode {
 }
 
 impl MeshtasticDisplay for ModemPreset {
+    /// Converts ModemPreset to string (e.g., "LongFast", "ShortSlow").
     fn to_mesh_string(&self) -> &'static str {
         match self {
             ModemPreset::LongFast => "LongFast",
@@ -90,13 +95,13 @@ pub fn generate_random_psk() -> String {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos() as u64;
-    let mut bytes = vec![0u8; 32];
+    let mut bytes = [0u8; 32];
     let mut rng = seed;
     for byte in bytes.iter_mut() {
         rng = rng.wrapping_mul(1103515245).wrapping_add(12345);
         *byte = (rng >> 16) as u8;
     }
-    STANDARD.encode(&bytes)
+    STANDARD.encode(bytes)
 }
 
 /// Converts a text phrase to a 32-byte PSK using SHA256 hashing.
@@ -131,6 +136,21 @@ impl PskMode {
     }
 }
 
+impl std::fmt::Display for PskMode {
+    /// Formats PskMode as a human-readable string for TUI display.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PskMode::Default => write!(f, "Default"),
+            PskMode::None => write!(f, "None"),
+            PskMode::Random => write!(f, "Random"),
+            PskMode::Base64(_) => write!(f, "Base64"),
+            PskMode::Passphrase(_) => write!(f, "Passphrase"),
+        }
+    }
+}
+
+/// Validates and normalizes a base64-encoded PSK.
+/// Returns the PSK if valid (16 or 32 bytes), or an error otherwise.
 fn validate_and_normalize_psk(psk: &str) -> Result<String, String> {
     STANDARD
         .decode(psk)
@@ -828,5 +848,17 @@ mod tests {
         assert_eq!(ModemPreset::ShortFast.to_mesh_string(), "ShortFast");
         assert_eq!(ModemPreset::LongModerate.to_mesh_string(), "LongModerate");
         assert_eq!(ModemPreset::ShortTurbo.to_mesh_string(), "ShortTurbo");
+    }
+
+    #[test]
+    fn test_psk_mode_display() {
+        assert_eq!(PskMode::Default.to_string(), "Default");
+        assert_eq!(PskMode::None.to_string(), "None");
+        assert_eq!(PskMode::Random.to_string(), "Random");
+        assert_eq!(PskMode::Base64("test".to_string()).to_string(), "Base64");
+        assert_eq!(
+            PskMode::Passphrase("test".to_string()).to_string(),
+            "Passphrase"
+        );
     }
 }

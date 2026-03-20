@@ -37,7 +37,7 @@ fn print_channels(channels: &[meshurl::models::ChannelInfo]) {
         );
 
         if !channel.psk.is_empty() {
-            let psk_color = get_psk_color(&channel.psk_type);
+            let psk_color = get_psk_color(channel.psk_type);
 
             println!(
                 "    {} {}",
@@ -74,7 +74,7 @@ fn print_channels(channels: &[meshurl::models::ChannelInfo]) {
     }
 }
 
-fn get_psk_color(psk_type: &meshurl::models::PskType) -> Color {
+fn get_psk_color(psk_type: meshurl::models::PskType) -> Color {
     if psk_type.is_default() {
         Color::BrightCyan
     } else if psk_type.is_custom() {
