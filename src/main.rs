@@ -110,7 +110,7 @@ enum Region {
 }
 
 impl Region {
-    fn to_value(&self) -> &'static str {
+    fn to_value(self) -> &'static str {
         match self {
             Region::Us => "US",
             Region::Eu433 => "EU433",
@@ -145,7 +145,7 @@ enum ModemPresetArg {
 }
 
 impl ModemPresetArg {
-    fn to_value(&self) -> &'static str {
+    fn to_value(self) -> &'static str {
         match self {
             ModemPresetArg::LongFast => "LongFast",
             ModemPresetArg::LongSlow => "LongSlow",
