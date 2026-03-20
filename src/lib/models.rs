@@ -186,9 +186,9 @@ impl std::str::FromStr for ChannelInfo {
             }
         }
 
-        let (name, psk) = if is_default {
-            (String::new(), DEFAULT_PSK.to_string())
-        } else if name.is_none() && psk.is_none() && psk_mode.is_none() && psk_phrase.is_none() {
+        let (name, psk) = if is_default
+            || (name.is_none() && psk.is_none() && psk_mode.is_none() && psk_phrase.is_none())
+        {
             (String::new(), DEFAULT_PSK.to_string())
         } else {
             let final_name = name.unwrap_or_default();
@@ -274,7 +274,7 @@ impl PskType {
             1 => match psk[0] {
                 0 => PskType::None,
                 1 => PskType::Default,
-                n if n >= 2 && n <= 10 => PskType::Simple(n),
+                n if (2..=10).contains(&n) => PskType::Simple(n),
                 _ => PskType::Unknown,
             },
             16 => PskType::Aes128,
@@ -521,10 +521,10 @@ impl From<&ChannelInfo> for ChannelSettings {
         };
 
         let module_settings = if info.position_precision.is_some() || info.is_client_muted {
-            let mut ms = ModuleSettings::default();
-            ms.position_precision = info.position_precision.unwrap_or(0);
-            ms.is_client_muted = info.is_client_muted;
-            Some(ms)
+            Some(ModuleSettings {
+                position_precision: info.position_precision.unwrap_or(0),
+                is_client_muted: info.is_client_muted,
+            })
         } else {
             None
         };

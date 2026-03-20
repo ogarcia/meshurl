@@ -170,8 +170,7 @@ pub fn draw_decode_mode(f: &mut Frame, state: &mut DecodeDrawState) {
                 let all_lines = lora_info_lines(lora);
                 let start_idx = scroll_info.clamped_scroll as usize;
                 let end_idx = (start_idx + scroll_info.visible_lines).min(all_lines.len());
-                let visible_lines: Vec<Line> =
-                    all_lines[start_idx..end_idx].iter().cloned().collect();
+                let visible_lines: Vec<Line> = all_lines[start_idx..end_idx].to_vec();
 
                 let lora_border_color = if state.active_panel == ActivePanel::Lora {
                     Color::Yellow

@@ -134,9 +134,9 @@ pub fn print_lora(lora: &LoRaInfo) {
     let preset_str = format!("{:?}", lora.modem_preset);
     if !preset_str.is_empty() && preset_str != "Unset" {
         println!(
-            "    {} {}",
+            "    {} {} kHz",
             "Bandwidth:".color(Color::White),
-            format!("{} kHz", lora.bandwidth)
+            lora.bandwidth
         );
         println!(
             "    {} {}",
@@ -144,9 +144,9 @@ pub fn print_lora(lora: &LoRaInfo) {
             lora.spread_factor
         );
         println!(
-            "    {} {}",
+            "    {} 4/{}",
             "Coding Rate:".color(Color::White),
-            format!("4/{}", lora.coding_rate)
+            lora.coding_rate
         );
     }
 
