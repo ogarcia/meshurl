@@ -22,16 +22,33 @@ enum Cli {
 }
 
 #[derive(Parser, Debug)]
+#[command(after_help = EncodeArgs::EXAMPLES)]
 struct EncodeArgs {
     #[arg(
         long,
         short = 'c',
-        help = "Add a channel. Options: default, name=N, psk=XXX, psk_mode=default|none|random, psk_phrase=TEXT, uplink, downlink, pos=N, muted. Example: -c 'name=Test,psk_mode=random' -c 'name=Second,uplink'"
+        help = "Add a channel. Options: default, name=N, psk_base64=XXX, psk_passphrase=TEXT, psk_mode=default|none|random, uplink, downlink, pos=N, muted"
     )]
     channels: Vec<ChannelInfo>,
 
     #[command(flatten)]
     lora: Option<LoRaArgs>,
+}
+
+impl EncodeArgs {
+    const EXAMPLES: &'static str = r#"Channel Examples:
+  meshurl encode -c 'default'
+  meshurl encode -c 'name=Test,psk_mode=random'
+  meshurl encode -c 'name=Galicia,psk_passphrase=my secret phrase'
+  meshurl encode -c 'name=Private,psk_base64=CcZBoFJbADMGEoSkkYPA3Ha23rr7WPcyUo1AjorGQIA='
+  meshurl encode -c 'uplink,downlink,pos=32' -c 'name=Iberia,uplink,downlink'
+
+PSK Modes:
+  psk_mode=default  - Use the default (weak) key
+  psk_mode=none     - No encryption
+  psk_mode=random   - Generate a random AES-256 key
+  psk_base64=XXX    - Provide your own PSK in base64 (16 or 32 bytes)
+  psk_passphrase=TXT - Generate PSK from a text passphrase using SHA-256"#;
 }
 
 #[derive(Parser, Debug, Clone)]

@@ -31,6 +31,35 @@ pub const DEFAULT_PSK: &str = "AQ==";
 /// Base URL for Meshtastic channel configuration.
 pub const MESHTASTIC_URL_BASE: &str = "https://meshtastic.org/e/#";
 
+/// Generates a random 32-byte PSK encoded in base64.
+/// Uses a simple linear congruential generator seeded with current time.
+pub fn generate_random_psk() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64;
+    let mut bytes = vec![0u8; 32];
+    let mut rng = seed;
+    for byte in bytes.iter_mut() {
+        rng = rng.wrapping_mul(1103515245).wrapping_add(12345);
+        *byte = (rng >> 16) as u8;
+    }
+    STANDARD.encode(&bytes)
+}
+
+/// Converts a text phrase to a 32-byte PSK using SHA256 hashing.
+/// The phrase is hashed and encoded in base64.
+pub fn hash_phrase_to_psk(phrase: &str) -> String {
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+    hasher.update(phrase.as_bytes());
+    let result = hasher.finalize();
+    STANDARD.encode(result.as_slice())
+}
+
 /// PSK (Pre-Shared Key) mode for channel encryption.
 /// - Default: uses the default (weak, public) key
 /// - None: no encryption
@@ -42,8 +71,8 @@ pub enum PskMode {
     Default,
     None,
     Random,
-    Manual(String),
-    Phrase(String),
+    Base64(String),
+    Passphrase(String),
 }
 
 impl PskMode {
@@ -129,22 +158,24 @@ impl std::str::FromStr for ChannelInfo {
             match key {
                 "default" | "d" => is_default = true,
                 "name" | "n" => name = Some(value.unwrap_or("").to_string()),
-                "psk" => psk = Some(value.unwrap_or("").to_string()),
+                "psk_base64" | "psk" => psk = Some(value.unwrap_or("").to_string()),
                 "psk_mode" | "mode" => {
                     psk_mode = match value {
                         Some("default") | Some("d") => Some(PskMode::Default),
                         Some("none") | Some("n") => Some(PskMode::None),
                         Some("random") | Some("r") => Some(PskMode::Random),
-                        Some(v) if v.starts_with("manual:") => {
-                            Some(PskMode::Manual(v[7..].to_string()))
+                        Some(v) if v.starts_with("base64:") => {
+                            Some(PskMode::Base64(v[7..].to_string()))
                         }
-                        Some(v) if v.starts_with("phrase:") => {
-                            Some(PskMode::Phrase(v[7..].to_string()))
+                        Some(v) if v.starts_with("passphrase:") => {
+                            Some(PskMode::Passphrase(v[12..].to_string()))
                         }
                         _ => None,
                     }
                 }
-                "psk_phrase" | "phrase" => psk_phrase = Some(value.unwrap_or("").to_string()),
+                "psk_passphrase" | "psk_phrase" | "phrase" => {
+                    psk_phrase = Some(value.unwrap_or("").to_string())
+                }
                 "uplink" | "up" => uplink = true,
                 "downlink" | "down" => downlink = true,
                 "pos" | "precision" => {
@@ -170,43 +201,20 @@ impl std::str::FromStr for ChannelInfo {
                         n => Err(format!("Invalid PSK length: {} bytes", n)),
                     })?
             } else if let Some(phrase) = psk_phrase {
-                use sha2::{Digest, Sha256};
-                let mut hasher = Sha256::new();
-                hasher.update(phrase.as_bytes());
-                let result = hasher.finalize();
-                STANDARD.encode(result.as_slice())
+                hash_phrase_to_psk(&phrase)
             } else {
                 match psk_mode.unwrap_or(PskMode::Default) {
                     PskMode::Default => DEFAULT_PSK.to_string(),
                     PskMode::None => String::new(),
-                    PskMode::Random => {
-                        use std::time::{SystemTime, UNIX_EPOCH};
-                        let seed = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap()
-                            .as_nanos() as u64;
-                        let mut bytes = vec![0u8; 32];
-                        let mut rng = seed;
-                        for byte in bytes.iter_mut() {
-                            rng = rng.wrapping_mul(1103515245).wrapping_add(12345);
-                            *byte = (rng >> 16) as u8;
-                        }
-                        STANDARD.encode(&bytes)
-                    }
-                    PskMode::Manual(psk_str) => STANDARD
+                    PskMode::Random => generate_random_psk(),
+                    PskMode::Base64(psk_str) => STANDARD
                         .decode(psk_str)
                         .map_err(|_| "Invalid Base64 PSK".to_string())
                         .and_then(|bytes| match bytes.len() {
                             16 | 32 => Ok(STANDARD.encode(&bytes)),
                             n => Err(format!("Invalid PSK length: {} bytes", n)),
                         })?,
-                    PskMode::Phrase(phrase) => {
-                        use sha2::{Digest, Sha256};
-                        let mut hasher = Sha256::new();
-                        hasher.update(phrase.as_bytes());
-                        let result = hasher.finalize();
-                        STANDARD.encode(result.as_slice())
-                    }
+                    PskMode::Passphrase(phrase) => hash_phrase_to_psk(&phrase),
                 }
             };
             (final_name, final_psk)
@@ -564,30 +572,56 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_channel_info_psk_mode_manual() {
+    fn test_channel_info_psk_mode_base64() {
         let psk = "CcZBoFJbADPGEoSkkYPA3Ha23rr7WPcyUo1AjorGQIA=";
-        let channel: ChannelInfo = format!("psk_mode=manual:{}", psk).parse().unwrap();
+        let channel: ChannelInfo = format!("psk_mode=base64:{}", psk).parse().unwrap();
         assert!(channel.psk_type != PskType::None);
         assert!(!channel.psk.is_empty());
         assert_eq!(channel.psk, psk);
     }
 
     #[test]
-    fn test_channel_info_psk_mode_phrase() {
-        let channel: ChannelInfo = "psk_mode=phrase:my secret phrase".parse().unwrap();
+    fn test_channel_info_psk_mode_passphrase() {
+        let channel: ChannelInfo = "psk_mode=passphrase:my secret phrase".parse().unwrap();
         assert_eq!(channel.psk_type, PskType::Aes256);
         assert_eq!(channel.psk.len(), 44);
     }
 
     #[test]
-    fn test_channel_info_psk_mode_manual_invalid() {
-        let result: Result<ChannelInfo, _> = "psk_mode=manual:not-valid-base64!!!".parse();
+    fn test_channel_info_psk_mode_base64_invalid() {
+        let result: Result<ChannelInfo, _> = "psk_mode=base64:not-valid-base64!!!".parse();
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_channel_info_psk_mode_manual_short() {
-        let result: Result<ChannelInfo, _> = "psk_mode=manual:MTIzNDU2".parse();
+    fn test_channel_info_psk_mode_base64_short() {
+        let result: Result<ChannelInfo, _> = "psk_mode=base64:MTIzNDU2".parse();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_generate_random_psk() {
+        let psk1 = generate_random_psk();
+        let psk2 = generate_random_psk();
+
+        assert!(!psk1.is_empty());
+        assert!(!psk2.is_empty());
+        assert_ne!(psk1, psk2);
+
+        let decoded = STANDARD.decode(&psk1).unwrap();
+        assert_eq!(decoded.len(), 32);
+    }
+
+    #[test]
+    fn test_hash_phrase_to_psk() {
+        let psk1 = hash_phrase_to_psk("my secret phrase");
+        let psk2 = hash_phrase_to_psk("my secret phrase");
+        let psk3 = hash_phrase_to_psk("different phrase");
+
+        assert_eq!(psk1, psk2);
+        assert_ne!(psk1, psk3);
+
+        let decoded = STANDARD.decode(&psk1).unwrap();
+        assert_eq!(decoded.len(), 32);
     }
 }

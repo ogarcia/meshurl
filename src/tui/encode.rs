@@ -1,8 +1,8 @@
 use base64::Engine;
 use meshurl::encoder::{encode_url, modem_preset_from_str, region_code_from_str};
 use meshurl::models::{
-    get_preset_params, ChannelInfo, ChannelRole, LoRaInfo, MeshtasticConfig, PskMode, PskType,
-    DEFAULT_PSK, POSITION_OPTIONS,
+    generate_random_psk, get_preset_params, hash_phrase_to_psk, ChannelInfo, ChannelRole, LoRaInfo,
+    MeshtasticConfig, PskMode, PskType, DEFAULT_PSK, POSITION_OPTIONS,
 };
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
@@ -191,7 +191,7 @@ impl ChannelPopupState {
         } else if channel.psk == DEFAULT_PSK {
             (PskMode::Default, String::new())
         } else {
-            (PskMode::Manual(channel.psk.clone()), channel.psk.clone())
+            (PskMode::Base64(channel.psk.clone()), channel.psk.clone())
         };
 
         let name_textarea = TextArea::default();
@@ -262,28 +262,16 @@ impl ChannelPopupState {
 
     pub fn to_channel_info(&self, default_index: usize) -> (usize, ChannelInfo) {
         use base64::engine::general_purpose::STANDARD;
-        use std::time::{SystemTime, UNIX_EPOCH};
-
         let index = self.channel_index.unwrap_or(default_index);
 
         let (psk, psk_type) = match &self.psk_mode {
             PskMode::Default => (DEFAULT_PSK.to_string(), PskType::Default),
             PskMode::None => (String::new(), PskType::None),
             PskMode::Random => {
-                let seed = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos() as u64;
-                let mut bytes = vec![0u8; 32];
-                let mut rng = seed;
-                for byte in bytes.iter_mut() {
-                    rng = rng.wrapping_mul(1103515245).wrapping_add(12345);
-                    *byte = (rng >> 16) as u8;
-                }
-                let psk = STANDARD.encode(&bytes);
+                let psk = generate_random_psk();
                 (psk, PskType::Aes256)
             }
-            PskMode::Manual(psk_str) => {
+            PskMode::Base64(psk_str) => {
                 let psk = if psk_str.is_empty() {
                     String::new()
                 } else {
@@ -304,12 +292,8 @@ impl ChannelPopupState {
                 };
                 (psk, psk_type)
             }
-            PskMode::Phrase(phrase) => {
-                use sha2::{Digest, Sha256};
-                let mut hasher = Sha256::new();
-                hasher.update(phrase.as_bytes());
-                let result = hasher.finalize();
-                let psk = STANDARD.encode(result.as_slice());
+            PskMode::Passphrase(phrase) => {
+                let psk = hash_phrase_to_psk(phrase);
                 (psk, PskType::Aes256)
             }
         };
@@ -338,7 +322,7 @@ impl ChannelPopupState {
 fn get_popup_fields(psk_mode: &PskMode) -> Vec<&'static str> {
     let mut fields = vec!["Name", "PSK Mode"];
 
-    if matches!(psk_mode, PskMode::Manual(_) | PskMode::Phrase(_)) {
+    if matches!(psk_mode, PskMode::Base64(_) | PskMode::Passphrase(_)) {
         fields.push("PSK");
     }
 
@@ -881,8 +865,8 @@ pub fn draw_channel_popup(f: &mut Frame, state: &ChannelPopupState) {
                 PskMode::Default => "Default".to_string(),
                 PskMode::None => "None".to_string(),
                 PskMode::Random => "Random".to_string(),
-                PskMode::Manual(_) => "Manual".to_string(),
-                PskMode::Phrase(_) => "Phrase".to_string(),
+                PskMode::Base64(_) => "Base64".to_string(),
+                PskMode::Passphrase(_) => "Passphrase".to_string(),
             },
             "PSK" => {
                 let max_len = 22;
@@ -962,8 +946,8 @@ pub fn draw_channel_popup(f: &mut Frame, state: &ChannelPopupState) {
         f.render_widget(Clear, overlay_rect);
 
         let psk_title = match state.psk_mode {
-            PskMode::Manual(_) => " PSK (base64) ",
-            PskMode::Phrase(_) => " PSK (phrase) ",
+            PskMode::Base64(_) => " PSK (base64) ",
+            PskMode::Passphrase(_) => " PSK (passphrase) ",
             _ => " PSK ",
         };
 
@@ -1300,7 +1284,7 @@ pub fn handle_popup_keys(
 
     if state.editing_psk {
         if matches!(key.code, KeyCode::Enter) {
-            if matches!(state.psk_mode, PskMode::Manual(_)) {
+            if matches!(state.psk_mode, PskMode::Base64(_)) {
                 let psk_value = state
                     .psk_textarea
                     .lines()
@@ -1402,20 +1386,20 @@ pub fn handle_popup_keys(
                             (PskMode::Default, true) => (PskMode::None, String::new()),
                             (PskMode::None, true) => (PskMode::Random, String::new()),
                             (PskMode::Random, true) => {
-                                (PskMode::Manual(String::new()), String::new())
+                                (PskMode::Base64(String::new()), String::new())
                             }
-                            (PskMode::Manual(_), true) => {
-                                (PskMode::Phrase(String::new()), String::new())
+                            (PskMode::Base64(_), true) => {
+                                (PskMode::Passphrase(String::new()), String::new())
                             }
-                            (PskMode::Phrase(_), true) => (PskMode::Default, String::new()),
+                            (PskMode::Passphrase(_), true) => (PskMode::Default, String::new()),
                             (PskMode::Default, false) => {
-                                (PskMode::Phrase(String::new()), String::new())
+                                (PskMode::Passphrase(String::new()), String::new())
                             }
                             (PskMode::None, false) => (PskMode::Default, String::new()),
                             (PskMode::Random, false) => (PskMode::None, String::new()),
-                            (PskMode::Manual(_), false) => (PskMode::Random, String::new()),
-                            (PskMode::Phrase(_), false) => {
-                                (PskMode::Manual(String::new()), String::new())
+                            (PskMode::Base64(_), false) => (PskMode::Random, String::new()),
+                            (PskMode::Passphrase(_), false) => {
+                                (PskMode::Base64(String::new()), String::new())
                             }
                         };
                         state.psk_mode = new_mode;
