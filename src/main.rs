@@ -204,15 +204,16 @@ fn main() {
 fn encode_config(args: &EncodeArgs) -> Result<(MeshtasticConfig, String, String), EncodeError> {
     let mut config = MeshtasticConfig::new();
 
-    let channels_to_create: Vec<ChannelInfo> = if args.channels.is_empty() {
-        vec!["default"
+    let channels_iter: Box<dyn Iterator<Item = ChannelInfo>> = if args.channels.is_empty() {
+        let ch: ChannelInfo = "default"
             .parse()
-            .map_err(|e: String| EncodeError::ProtobufEncode(e))?]
+            .map_err(|e: String| EncodeError::ProtobufEncode(e))?;
+        Box::new(std::iter::once(ch))
     } else {
-        args.channels.clone()
+        Box::new(args.channels.iter().cloned())
     };
 
-    for (i, mut ch) in channels_to_create.into_iter().enumerate() {
+    for (i, mut ch) in channels_iter.enumerate() {
         ch.index = i;
         ch.role = if i == 0 {
             ChannelRole::Primary

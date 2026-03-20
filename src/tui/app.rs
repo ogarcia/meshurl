@@ -192,9 +192,9 @@ fn run_inner(
                                     state.active_panel = ActivePanel::Channels;
                                 }
                                 KeyCode::Char('m') | KeyCode::Char('M') => {
-                                    match state.config_result.clone() {
+                                    match state.config_result.as_ref() {
                                         Some(Ok(config)) if state.app_mode == AppMode::Decode => {
-                                            state.encode_config = config;
+                                            state.encode_config = config.clone();
                                             state.app_mode = AppMode::Encode;
                                             state.active_panel = ActivePanel::Channels;
                                             state.encode_channels_state.select(Some(0));

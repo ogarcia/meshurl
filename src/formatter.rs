@@ -37,18 +37,17 @@ fn print_channels(channels: &[meshurl::models::ChannelInfo]) {
         );
 
         if !channel.psk.is_empty() {
-            let psk_value_color = get_psk_color(&channel.psk_type);
-            let psk_type_color = get_psk_color(&channel.psk_type);
+            let psk_color = get_psk_color(&channel.psk_type);
 
             println!(
                 "    {} {}",
                 "PSK:".color(Color::White),
-                channel.psk.color(psk_value_color)
+                channel.psk.color(psk_color)
             );
             println!(
                 "    {} {}",
                 "PSK Type:".color(Color::White),
-                channel.psk_type.as_str().color(psk_type_color)
+                channel.psk_type.as_str().color(psk_color)
             );
         } else {
             println!(

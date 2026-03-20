@@ -191,7 +191,8 @@ impl ChannelPopupState {
         } else if channel.psk == DEFAULT_PSK {
             (PskMode::Default, String::new())
         } else {
-            (PskMode::Base64(channel.psk.clone()), channel.psk.clone())
+            let psk = channel.psk.clone();
+            (PskMode::Base64(psk.clone()), psk)
         };
 
         let name_textarea = TextArea::default();
