@@ -299,13 +299,11 @@ pub fn handle_decode_keys(
         }
         KeyCode::Down => {
             if *state.active_panel == ActivePanel::Channels {
-                if let Some(config) = state.config_result {
-                    if let Ok(cfg) = config {
-                        let max = cfg.channels.len().saturating_sub(1);
-                        let current = state.channels_list_state.selected().unwrap_or(0);
-                        if current < max {
-                            state.channels_list_state.select(Some(current + 1));
-                        }
+                if let Some(Ok(cfg)) = state.config_result {
+                    let max = cfg.channels.len().saturating_sub(1);
+                    let current = state.channels_list_state.selected().unwrap_or(0);
+                    if current < max {
+                        state.channels_list_state.select(Some(current + 1));
                     }
                 }
                 *state.channels_scroll = state.channels_list_state.selected().unwrap_or(0);

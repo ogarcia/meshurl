@@ -346,8 +346,7 @@ pub fn channel_list_item(index: usize, channel: &ChannelInfo) -> ListItem<'_> {
         ]),
     ];
 
-    if channel.position_precision.is_some() && channel.position_precision.unwrap() > 0 {
-        let precision = channel.position_precision.unwrap();
+    if let Some(precision) = channel.position_precision.filter(|&p| p > 0) {
         let precision_text = POSITION_OPTIONS
             .iter()
             .find(|(_, v)| *v == precision)

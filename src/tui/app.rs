@@ -171,16 +171,10 @@ fn run_inner(
                         state.textarea.input(key);
                     } else {
                         let is_editing_channel_name = state.app_mode == AppMode::Encode
-                            && state
-                                .channel_popup
-                                .as_ref()
-                                .map_or(false, |p| p.editing_name);
+                            && state.channel_popup.as_ref().is_some_and(|p| p.editing_name);
 
                         let is_editing_channel_psk = state.app_mode == AppMode::Encode
-                            && state
-                                .channel_popup
-                                .as_ref()
-                                .map_or(false, |p| p.editing_psk);
+                            && state.channel_popup.as_ref().is_some_and(|p| p.editing_psk);
 
                         if is_editing_channel_name
                             && !matches!(key.code, KeyCode::Esc | KeyCode::Enter)
@@ -205,9 +199,11 @@ fn run_inner(
                                     state.active_panel = ActivePanel::Channels;
                                 }
                                 KeyCode::Char('m') | KeyCode::Char('M') => {
-                                    if state.app_mode == AppMode::Decode {
-                                        if let Some(Ok(config)) = &state.config_result.clone() {
-                                            state.encode_config = config.clone();
+                                    if state.app_mode == AppMode::Decode
+                                        && matches!(&state.config_result, Some(Ok(_)))
+                                    {
+                                        if let Some(Ok(config)) = state.config_result.clone() {
+                                            state.encode_config = config;
                                             state.app_mode = AppMode::Encode;
                                             state.active_panel = ActivePanel::Channels;
                                             state.encode_channels_state.select(Some(0));
@@ -237,7 +233,7 @@ fn run_inner(
                                         && state
                                             .channel_popup
                                             .as_ref()
-                                            .map_or(false, |p| p.editing_name)
+                                            .is_some_and(|p| p.editing_name)
                                     {
                                         if let Some(popup) = state.channel_popup.as_mut() {
                                             popup.cancel_editing_name();
@@ -246,7 +242,7 @@ fn run_inner(
                                         && state
                                             .channel_popup
                                             .as_ref()
-                                            .map_or(false, |p| p.editing_psk)
+                                            .is_some_and(|p| p.editing_psk)
                                     {
                                         if let Some(popup) = state.channel_popup.as_mut() {
                                             popup.cancel_editing_psk();
