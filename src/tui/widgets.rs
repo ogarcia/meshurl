@@ -2,8 +2,38 @@ use meshurl::models::{ChannelInfo, ChannelRole, LoRaInfo, PskType, POSITION_OPTI
 use ratatui::{
     style::{Color, Style},
     text::{Line, Span},
-    widgets::ListItem,
+    widgets::{Block, Borders, Clear, ListItem, Padding, Paragraph},
+    Frame,
 };
+
+#[derive(Clone)]
+pub struct ToastMessage {
+    pub text: String,
+    pub is_success: bool,
+    pub is_uncertain: bool,
+}
+
+pub fn render_toast(f: &mut Frame, toast: &ToastMessage) {
+    let color = if toast.is_uncertain {
+        Color::Yellow
+    } else if toast.is_success {
+        Color::Green
+    } else {
+        Color::Red
+    };
+    let area = f.area();
+    let width = toast.text.len() as u16 + 4;
+    let toast_area = ratatui::layout::Rect::new(area.width.saturating_sub(width) - 1, 1, width, 3);
+    f.render_widget(Clear, toast_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .padding(Padding::new(1, 1, 0, 0))
+        .border_style(Style::default().fg(color));
+    let paragraph = Paragraph::new(toast.text.clone())
+        .style(Style::default().fg(color))
+        .block(block);
+    f.render_widget(paragraph, toast_area);
+}
 
 pub fn yes_no(value: bool) -> &'static str {
     if value {
@@ -18,8 +48,7 @@ pub fn channel_total_lines(channels: &[ChannelInfo]) -> usize {
         .iter()
         .map(|ch| {
             let base_lines = 4;
-            let has_position =
-                ch.position_precision.is_some() && ch.position_precision.unwrap() > 0;
+            let has_position = ch.position_precision.is_some_and(|p| p > 0);
             base_lines + if has_position { 1 } else { 0 }
         })
         .sum()

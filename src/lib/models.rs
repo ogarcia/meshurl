@@ -81,6 +81,16 @@ impl PskMode {
     }
 }
 
+fn validate_and_normalize_psk(psk: &str) -> Result<String, String> {
+    STANDARD
+        .decode(psk)
+        .map_err(|_| "Invalid Base64 PSK".to_string())
+        .and_then(|bytes| match bytes.len() {
+            16 | 32 => Ok(STANDARD.encode(&bytes)),
+            n => Err(format!("Invalid PSK length: {} bytes", n)),
+        })
+}
+
 /// PSK encryption type used.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PskType {
@@ -193,13 +203,7 @@ impl std::str::FromStr for ChannelInfo {
         } else {
             let final_name = name.unwrap_or_default();
             let final_psk = if let Some(p) = psk {
-                STANDARD
-                    .decode(&p)
-                    .map_err(|_| "Invalid Base64 PSK".to_string())
-                    .and_then(|bytes| match bytes.len() {
-                        16 | 32 => Ok(STANDARD.encode(&bytes)),
-                        n => Err(format!("Invalid PSK length: {} bytes", n)),
-                    })?
+                validate_and_normalize_psk(&p)?
             } else if let Some(phrase) = psk_phrase {
                 hash_phrase_to_psk(&phrase)
             } else {
@@ -207,13 +211,7 @@ impl std::str::FromStr for ChannelInfo {
                     PskMode::Default => DEFAULT_PSK.to_string(),
                     PskMode::None => String::new(),
                     PskMode::Random => generate_random_psk(),
-                    PskMode::Base64(psk_str) => STANDARD
-                        .decode(psk_str)
-                        .map_err(|_| "Invalid Base64 PSK".to_string())
-                        .and_then(|bytes| match bytes.len() {
-                            16 | 32 => Ok(STANDARD.encode(&bytes)),
-                            n => Err(format!("Invalid PSK length: {} bytes", n)),
-                        })?,
+                    PskMode::Base64(psk_str) => validate_and_normalize_psk(&psk_str)?,
                     PskMode::Passphrase(phrase) => hash_phrase_to_psk(&phrase),
                 }
             };
@@ -517,7 +515,7 @@ impl From<&ChannelInfo> for ChannelSettings {
         let psk = if info.psk.is_empty() {
             Vec::new()
         } else {
-            STANDARD.decode(&info.psk).unwrap_or_default()
+            STANDARD.decode(&info.psk).unwrap_or_else(|_| Vec::new())
         };
 
         let module_settings = if info.position_precision.is_some() || info.is_client_muted {

@@ -4,14 +4,11 @@ use ratatui::crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{
-    backend::CrosstermBackend,
-    style::{Color, Style},
-    widgets::{Block, Borders, ListState, Padding, Paragraph},
-    Frame, Terminal,
-};
+use ratatui::{backend::CrosstermBackend, widgets::ListState, Frame, Terminal};
 use ratatui_textarea::TextArea;
 use std::io;
+
+pub use crate::tui::widgets::{render_toast, ToastMessage};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum AppMode {
@@ -25,13 +22,6 @@ pub enum ActivePanel {
     Channels,
     Lora,
     UrlEncode,
-}
-
-#[derive(Clone)]
-pub struct ToastMessage {
-    pub text: String,
-    pub is_success: bool,
-    pub is_uncertain: bool,
 }
 
 pub struct AppState {
@@ -323,26 +313,7 @@ fn draw(f: &mut Frame, state: &mut AppState) {
         }
 
         if let Some(toast) = &state.toast {
-            let color = if toast.is_uncertain {
-                Color::Yellow
-            } else if toast.is_success {
-                Color::Green
-            } else {
-                Color::Red
-            };
-            let area = f.area();
-            let width = toast.text.len() as u16 + 4;
-            let toast_area =
-                ratatui::layout::Rect::new(area.width.saturating_sub(width) - 1, 1, width, 3);
-            f.render_widget(ratatui::widgets::Clear, toast_area);
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .padding(Padding::new(1, 1, 0, 0))
-                .border_style(Style::default().fg(color));
-            let paragraph = Paragraph::new(toast.text.clone())
-                .style(Style::default().fg(color))
-                .block(block);
-            f.render_widget(paragraph, toast_area);
+            render_toast(f, toast);
         }
         return;
     }
@@ -360,25 +331,6 @@ fn draw(f: &mut Frame, state: &mut AppState) {
     crate::tui::decode::draw_decode_mode(f, &mut decode_draw_state);
 
     if let Some(toast) = &state.toast {
-        let color = if toast.is_uncertain {
-            Color::Yellow
-        } else if toast.is_success {
-            Color::Green
-        } else {
-            Color::Red
-        };
-        let area = f.area();
-        let width = toast.text.len() as u16 + 4;
-        let toast_area =
-            ratatui::layout::Rect::new(area.width.saturating_sub(width) - 1, 1, width, 3);
-        f.render_widget(ratatui::widgets::Clear, toast_area);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .padding(Padding::new(1, 1, 0, 0))
-            .border_style(Style::default().fg(color));
-        let paragraph = Paragraph::new(toast.text.clone())
-            .style(Style::default().fg(color))
-            .block(block);
-        f.render_widget(paragraph, toast_area);
+        render_toast(f, toast);
     }
 }

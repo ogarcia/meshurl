@@ -30,7 +30,7 @@ use crate::models::{MeshtasticConfig, MESHTASTIC_URL_BASE};
 pub fn decode_url(url: &str) -> Result<MeshtasticConfig, DecodeError> {
     let hash_part = extract_hash(url)?;
     let decoded = decode_base64(hash_part)?;
-    let channel_set = decode_protobuf(decoded)?;
+    let channel_set = decode_protobuf(&decoded)?;
     Ok(MeshtasticConfig::from_channel_set(&channel_set))
 }
 
@@ -56,8 +56,8 @@ fn decode_base64(hash: &str) -> Result<Vec<u8>, DecodeError> {
 }
 
 /// Decodes protobuf bytes into a ChannelSet.
-fn decode_protobuf(data: Vec<u8>) -> Result<ChannelSet, DecodeError> {
-    ChannelSet::decode(data.as_slice()).map_err(|e| DecodeError::ProtobufDecode(e.to_string()))
+fn decode_protobuf(data: &[u8]) -> Result<ChannelSet, DecodeError> {
+    ChannelSet::decode(data).map_err(|e| DecodeError::ProtobufDecode(e.to_string()))
 }
 
 #[cfg(test)]
