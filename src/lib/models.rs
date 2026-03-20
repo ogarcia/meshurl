@@ -4,6 +4,56 @@ use meshtastic_protobufs::meshtastic::config::{
 };
 use meshtastic_protobufs::meshtastic::{ChannelSettings, ModuleSettings};
 
+pub trait MeshtasticDisplay {
+    fn to_mesh_string(&self) -> &'static str;
+}
+
+impl MeshtasticDisplay for RegionCode {
+    fn to_mesh_string(&self) -> &'static str {
+        match self {
+            RegionCode::Unset => "Unset",
+            RegionCode::Us => "US",
+            RegionCode::Eu433 => "EU433",
+            RegionCode::Eu868 => "EU868",
+            RegionCode::Cn => "CN",
+            RegionCode::Jp => "JP",
+            RegionCode::Anz => "ANZ",
+            RegionCode::Kr => "KR",
+            RegionCode::Tw => "TW",
+            RegionCode::Ru => "RU",
+            RegionCode::In => "IN",
+            RegionCode::Nz865 => "NZ865",
+            RegionCode::Th => "TH",
+            RegionCode::Lora24 => "Lora24",
+            RegionCode::Ua433 => "UA433",
+            RegionCode::Ua868 => "UA868",
+            RegionCode::My433 => "MY433",
+            RegionCode::My919 => "MY919",
+            RegionCode::Sg923 => "SG923",
+            RegionCode::Ph433 => "PH433",
+            RegionCode::Ph868 => "PH868",
+            RegionCode::Ph915 => "PH915",
+            RegionCode::Anz433 => "ANZ433",
+        }
+    }
+}
+
+impl MeshtasticDisplay for ModemPreset {
+    fn to_mesh_string(&self) -> &'static str {
+        match self {
+            ModemPreset::LongFast => "LongFast",
+            ModemPreset::LongSlow => "LongSlow",
+            ModemPreset::VeryLongSlow => "VeryLongSlow",
+            ModemPreset::MediumSlow => "MediumSlow",
+            ModemPreset::MediumFast => "MediumFast",
+            ModemPreset::ShortSlow => "ShortSlow",
+            ModemPreset::ShortFast => "ShortFast",
+            ModemPreset::LongModerate => "LongModerate",
+            ModemPreset::ShortTurbo => "ShortTurbo",
+        }
+    }
+}
+
 /// Position precision options for Meshtastic channels.
 /// Each tuple contains (display_name, precision_bits).
 /// Values 0-32 represent precision bits:
@@ -734,5 +784,49 @@ mod tests {
     fn test_channel_info_with_special_chars_in_name() {
         let channel: ChannelInfo = "n=Test_Channel-123".parse().unwrap();
         assert_eq!(channel.name, "Test_Channel-123");
+    }
+
+    #[test]
+    fn test_region_code_to_mesh_string() {
+        use meshtastic_protobufs::meshtastic::config::lo_ra_config::RegionCode;
+
+        assert_eq!(RegionCode::Us.to_mesh_string(), "US");
+        assert_eq!(RegionCode::Eu433.to_mesh_string(), "EU433");
+        assert_eq!(RegionCode::Eu868.to_mesh_string(), "EU868");
+        assert_eq!(RegionCode::Cn.to_mesh_string(), "CN");
+        assert_eq!(RegionCode::Jp.to_mesh_string(), "JP");
+        assert_eq!(RegionCode::Anz.to_mesh_string(), "ANZ");
+        assert_eq!(RegionCode::Kr.to_mesh_string(), "KR");
+        assert_eq!(RegionCode::Tw.to_mesh_string(), "TW");
+        assert_eq!(RegionCode::Ru.to_mesh_string(), "RU");
+        assert_eq!(RegionCode::In.to_mesh_string(), "IN");
+        assert_eq!(RegionCode::Nz865.to_mesh_string(), "NZ865");
+        assert_eq!(RegionCode::Th.to_mesh_string(), "TH");
+        assert_eq!(RegionCode::Lora24.to_mesh_string(), "Lora24");
+        assert_eq!(RegionCode::Ua433.to_mesh_string(), "UA433");
+        assert_eq!(RegionCode::Ua868.to_mesh_string(), "UA868");
+        assert_eq!(RegionCode::My433.to_mesh_string(), "MY433");
+        assert_eq!(RegionCode::My919.to_mesh_string(), "MY919");
+        assert_eq!(RegionCode::Sg923.to_mesh_string(), "SG923");
+        assert_eq!(RegionCode::Ph433.to_mesh_string(), "PH433");
+        assert_eq!(RegionCode::Ph868.to_mesh_string(), "PH868");
+        assert_eq!(RegionCode::Ph915.to_mesh_string(), "PH915");
+        assert_eq!(RegionCode::Anz433.to_mesh_string(), "ANZ433");
+        assert_eq!(RegionCode::Unset.to_mesh_string(), "Unset");
+    }
+
+    #[test]
+    fn test_modem_preset_to_mesh_string() {
+        use meshtastic_protobufs::meshtastic::config::lo_ra_config::ModemPreset;
+
+        assert_eq!(ModemPreset::LongFast.to_mesh_string(), "LongFast");
+        assert_eq!(ModemPreset::LongSlow.to_mesh_string(), "LongSlow");
+        assert_eq!(ModemPreset::VeryLongSlow.to_mesh_string(), "VeryLongSlow");
+        assert_eq!(ModemPreset::MediumSlow.to_mesh_string(), "MediumSlow");
+        assert_eq!(ModemPreset::MediumFast.to_mesh_string(), "MediumFast");
+        assert_eq!(ModemPreset::ShortSlow.to_mesh_string(), "ShortSlow");
+        assert_eq!(ModemPreset::ShortFast.to_mesh_string(), "ShortFast");
+        assert_eq!(ModemPreset::LongModerate.to_mesh_string(), "LongModerate");
+        assert_eq!(ModemPreset::ShortTurbo.to_mesh_string(), "ShortTurbo");
     }
 }

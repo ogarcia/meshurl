@@ -2,7 +2,7 @@ use base64::Engine;
 use meshurl::encoder::{encode_url, modem_preset_from_str, region_code_from_str};
 use meshurl::models::{
     generate_random_psk, get_preset_params, hash_phrase_to_psk, ChannelInfo, ChannelRole, LoRaInfo,
-    PskMode, PskType, DEFAULT_PSK, POSITION_OPTIONS,
+    MeshtasticDisplay, PskMode, PskType, DEFAULT_PSK, POSITION_OPTIONS,
 };
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
@@ -77,8 +77,8 @@ impl LoRaPopupState {
     }
 
     pub fn from_lora(lora: &LoRaInfo) -> Self {
-        let region = format!("{:?}", lora.region);
-        let modem_preset = format!("{:?}", lora.modem_preset);
+        let region = lora.region.to_mesh_string().to_string();
+        let modem_preset = lora.modem_preset.to_mesh_string().to_string();
 
         Self {
             region,
@@ -1120,71 +1120,81 @@ pub fn handle_lora_popup_keys(
                 }
                 "Cancel" => None,
                 "Region" => {
-                    let idx = LORA_REGIONS
-                        .iter()
-                        .position(|r| r == &state.region)
-                        .unwrap_or(0);
-                    let len = LORA_REGIONS.len();
-                    let new_idx = ((idx as isize) + dir + len as isize) as usize % len;
-                    state.region = LORA_REGIONS[new_idx].to_string();
+                    if cycle_forward || cycle_backward {
+                        let idx = LORA_REGIONS
+                            .iter()
+                            .position(|r| r.eq_ignore_ascii_case(&state.region))
+                            .unwrap_or(0);
+                        let len = LORA_REGIONS.len();
+                        let new_idx = ((idx as isize) + dir + len as isize) as usize % len;
+                        state.region = LORA_REGIONS[new_idx].to_string();
+                    }
                     None
                 }
                 "Modem Preset" => {
-                    let idx = LORA_MODEM_PRESETS
-                        .iter()
-                        .position(|p| p == &state.modem_preset)
-                        .unwrap_or(0);
-                    let len = LORA_MODEM_PRESETS.len();
-                    let new_idx = ((idx as isize) + dir + len as isize) as usize % len;
-                    state.modem_preset = LORA_MODEM_PRESETS[new_idx].to_string();
+                    if cycle_forward || cycle_backward {
+                        let idx = LORA_MODEM_PRESETS
+                            .iter()
+                            .position(|p| p.eq_ignore_ascii_case(&state.modem_preset))
+                            .unwrap_or(0);
+                        let len = LORA_MODEM_PRESETS.len();
+                        let new_idx = ((idx as isize) + dir + len as isize) as usize % len;
+                        state.modem_preset = LORA_MODEM_PRESETS[new_idx].to_string();
+                    }
                     None
                 }
                 "TX Power" => {
-                    state.tx_power = if dir > 0 {
-                        if state.tx_power < 30 {
-                            state.tx_power + 1
+                    if cycle_forward || cycle_backward {
+                        state.tx_power = if dir > 0 {
+                            if state.tx_power < 30 {
+                                state.tx_power + 1
+                            } else {
+                                0
+                            }
                         } else {
-                            0
-                        }
-                    } else {
-                        if state.tx_power > 0 {
-                            state.tx_power - 1
-                        } else {
-                            30
-                        }
-                    };
+                            if state.tx_power > 0 {
+                                state.tx_power - 1
+                            } else {
+                                30
+                            }
+                        };
+                    }
                     None
                 }
                 "Hop Limit" => {
-                    state.hop_limit = if dir > 0 {
-                        if state.hop_limit < 7 {
-                            state.hop_limit + 1
+                    if cycle_forward || cycle_backward {
+                        state.hop_limit = if dir > 0 {
+                            if state.hop_limit < 7 {
+                                state.hop_limit + 1
+                            } else {
+                                1
+                            }
                         } else {
-                            1
-                        }
-                    } else {
-                        if state.hop_limit > 1 {
-                            state.hop_limit - 1
-                        } else {
-                            7
-                        }
-                    };
+                            if state.hop_limit > 1 {
+                                state.hop_limit - 1
+                            } else {
+                                7
+                            }
+                        };
+                    }
                     None
                 }
                 "Channel" => {
-                    state.channel_num = if dir > 0 {
-                        if state.channel_num < 255 {
-                            state.channel_num + 1
+                    if cycle_forward || cycle_backward {
+                        state.channel_num = if dir > 0 {
+                            if state.channel_num < 255 {
+                                state.channel_num + 1
+                            } else {
+                                0
+                            }
                         } else {
-                            0
-                        }
-                    } else {
-                        if state.channel_num > 0 {
-                            state.channel_num - 1
-                        } else {
-                            255
-                        }
-                    };
+                            if state.channel_num > 0 {
+                                state.channel_num - 1
+                            } else {
+                                255
+                            }
+                        };
+                    }
                     None
                 }
                 "TX Enabled" => {

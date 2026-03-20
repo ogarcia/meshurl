@@ -31,5 +31,6 @@ pub use encoder::{
 pub use errors::{DecodeError, EncodeError};
 pub use models::{
     generate_random_psk, get_preset_params, hash_phrase_to_psk, ChannelInfo, ChannelRole, LoRaInfo,
-    MeshtasticConfig, PskMode, PskType, DEFAULT_PSK, MESHTASTIC_URL_BASE, POSITION_OPTIONS,
+    MeshtasticConfig, MeshtasticDisplay, PskMode, PskType, DEFAULT_PSK, MESHTASTIC_URL_BASE,
+    POSITION_OPTIONS,
 };

@@ -1,4 +1,6 @@
-use meshurl::models::{ChannelInfo, ChannelRole, LoRaInfo, PskType, POSITION_OPTIONS};
+use meshurl::models::{
+    ChannelInfo, ChannelRole, LoRaInfo, MeshtasticDisplay, PskType, POSITION_OPTIONS,
+};
 use ratatui::{
     style::{Color, Style},
     text::{Line, Span},
@@ -129,14 +131,14 @@ pub fn lora_info_lines(lora: &LoRaInfo) -> Vec<Line<'_>> {
         Line::from(vec![
             Span::styled("Region: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                format!("{:?}", lora.region),
+                lora.region.to_mesh_string(),
                 Style::default().fg(region_color),
             ),
         ]),
         Line::from(vec![
             Span::styled("Modem Preset: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                format!("{:?}", lora.modem_preset),
+                lora.modem_preset.to_mesh_string(),
                 Style::default().fg(preset_color),
             ),
         ]),

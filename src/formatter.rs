@@ -1,5 +1,5 @@
 use colored::{Color, Colorize};
-use meshurl::models::{ChannelRole, LoRaInfo, MeshtasticConfig};
+use meshurl::models::{ChannelRole, LoRaInfo, MeshtasticConfig, MeshtasticDisplay};
 
 pub fn print_config(config: &MeshtasticConfig) {
     print_channels(&config.channels);
@@ -106,12 +106,12 @@ pub fn print_lora(lora: &LoRaInfo) {
     println!(
         "    {} {}",
         "Region:".color(Color::White),
-        format!("{:?}", lora.region).color(Color::BrightCyan)
+        lora.region.to_mesh_string().color(Color::BrightCyan)
     );
     println!(
         "    {} {}",
         "Modem Preset:".color(Color::White),
-        format!("{:?}", lora.modem_preset).color(Color::BrightCyan)
+        lora.modem_preset.to_mesh_string().color(Color::BrightCyan)
     );
 
     print_yes_no("Use Preset:", lora.use_preset);
@@ -131,7 +131,7 @@ pub fn print_lora(lora: &LoRaInfo) {
         print_yes_no("TX enabled:", lora.tx_enabled);
     }
 
-    let preset_str = format!("{:?}", lora.modem_preset);
+    let preset_str = lora.modem_preset.to_mesh_string();
     if !preset_str.is_empty() && preset_str != "Unset" {
         println!(
             "    {} {} kHz",
