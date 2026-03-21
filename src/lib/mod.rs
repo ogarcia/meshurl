@@ -5,13 +5,19 @@
 //! # Quick Start
 //!
 //! ```rust
-//! use meshurl::{decode_url, encode_url};
+//! use meshurl::{decode_url, DecodeResult};
 //!
-//! // Decode a URL
+//! // Decode a URL (supports both channel and node URLs)
 //! let url = "#CgsSAQEoATABOgIIDQoPEgEBGgZJYmVyaWEoATABChESAQEaCEFDb3J1w7FhKAEwARIWCAEY-gEgCygFOANABkgBUBtoAcAGAQ";
-//! let config = decode_url(url).expect("valid URL");
-//! for channel in config.channels {
-//!     println!("Channel: {}", channel.name);
+//! match decode_url(url).expect("valid URL") {
+//!     DecodeResult::Channel(config) => {
+//!         for channel in config.channels {
+//!             println!("Channel: {}", channel.name);
+//!         }
+//!     }
+//!     DecodeResult::Node(node) => {
+//!         println!("Node: {} ({})", node.long_name, node.short_name);
+//!     }
 //! }
 //!
 //! // Encode a configuration
@@ -23,7 +29,7 @@ pub mod encoder;
 pub mod errors;
 pub mod models;
 
-pub use decoder::decode_url;
+pub use decoder::{decode_url, DecodeResult};
 pub use encoder::{
     encode_url, encode_url_short, modem_preset_from_str, region_code_from_str, ModemPreset,
     RegionCode,
@@ -31,6 +37,6 @@ pub use encoder::{
 pub use errors::{DecodeError, EncodeError};
 pub use models::{
     generate_random_psk, get_preset_params, hash_phrase_to_psk, ChannelInfo, ChannelRole, LoRaInfo,
-    MeshtasticConfig, MeshtasticDisplay, PskMode, PskType, DEFAULT_PSK, MESHTASTIC_URL_BASE,
-    POSITION_OPTIONS,
+    MeshtasticConfig, MeshtasticDisplay, NodeInfo, PskMode, PskType, DEFAULT_PSK,
+    MESHTASTIC_CHANNEL_URL_BASE, MESHTASTIC_NODE_URL_BASE, POSITION_OPTIONS,
 };

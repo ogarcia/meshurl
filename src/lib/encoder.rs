@@ -6,7 +6,7 @@ use meshtastic_protobufs::meshtastic::ChannelSet;
 use prost::Message;
 
 use crate::errors::EncodeError;
-use crate::models::{MeshtasticConfig, MESHTASTIC_URL_BASE};
+use crate::models::{MeshtasticConfig, MESHTASTIC_CHANNEL_URL_BASE};
 
 /// Encodes a MeshtasticConfig into a full URL.
 ///
@@ -20,7 +20,7 @@ pub fn encode_url(config: &MeshtasticConfig) -> Result<String, EncodeError> {
     let channel_set = create_channel_set(config)?;
     let encoded = encode_protobuf(&channel_set)?;
     let base64 = encode_base64(&encoded)?;
-    Ok(format!("{}{}", MESHTASTIC_URL_BASE, base64))
+    Ok(format!("{}{}", MESHTASTIC_CHANNEL_URL_BASE, base64))
 }
 
 /// Encodes a MeshtasticConfig into a short URL (just the hash part).
@@ -198,7 +198,10 @@ mod tests {
 
         let encoded = encode_url_short(&config).unwrap();
 
-        let decoded = crate::decoder::decode_url(&encoded).unwrap();
+        let decoded = match crate::decoder::decode_url(&encoded).unwrap() {
+            crate::decoder::DecodeResult::Channel(c) => c,
+            crate::decoder::DecodeResult::Node(_) => panic!("Expected Channel"),
+        };
 
         assert_eq!(decoded.channels.len(), 1);
         assert_eq!(decoded.channels[0].name, "TestChannel");
@@ -283,7 +286,10 @@ mod tests {
             config.lora = Some(lora);
 
             let encoded = encode_url_short(&config).unwrap();
-            let decoded = crate::decoder::decode_url(&encoded).unwrap();
+            let decoded = match crate::decoder::decode_url(&encoded).unwrap() {
+                crate::decoder::DecodeResult::Channel(c) => c,
+                crate::decoder::DecodeResult::Node(_) => panic!("Expected Channel"),
+            };
             assert!(decoded.lora.is_some(), "Failed for preset {:?}", preset);
         }
     }
@@ -348,7 +354,10 @@ mod tests {
             config.lora = Some(lora);
 
             let encoded = encode_url_short(&config).unwrap();
-            let decoded = crate::decoder::decode_url(&encoded).unwrap();
+            let decoded = match crate::decoder::decode_url(&encoded).unwrap() {
+                crate::decoder::DecodeResult::Channel(c) => c,
+                crate::decoder::DecodeResult::Node(_) => panic!("Expected Channel"),
+            };
             assert!(decoded.lora.is_some(), "Failed for region {:?}", region);
         }
     }
@@ -384,7 +393,10 @@ mod tests {
         config.channels.push(channel2);
 
         let encoded = encode_url_short(&config).unwrap();
-        let decoded = crate::decoder::decode_url(&encoded).unwrap();
+        let decoded = match crate::decoder::decode_url(&encoded).unwrap() {
+            crate::decoder::DecodeResult::Channel(c) => c,
+            crate::decoder::DecodeResult::Node(_) => panic!("Expected Channel"),
+        };
 
         assert_eq!(decoded.channels.len(), 2);
         assert_eq!(decoded.channels[0].name, "Primary");
@@ -409,7 +421,10 @@ mod tests {
         config.channels.push(channel);
 
         let encoded = encode_url_short(&config).unwrap();
-        let decoded = crate::decoder::decode_url(&encoded).unwrap();
+        let decoded = match crate::decoder::decode_url(&encoded).unwrap() {
+            crate::decoder::DecodeResult::Channel(c) => c,
+            crate::decoder::DecodeResult::Node(_) => panic!("Expected Channel"),
+        };
 
         assert_eq!(decoded.channels.len(), 1);
     }
@@ -453,7 +468,10 @@ mod tests {
         config.lora = Some(lora);
 
         let encoded = encode_url_short(&config).unwrap();
-        let decoded = crate::decoder::decode_url(&encoded).unwrap();
+        let decoded = match crate::decoder::decode_url(&encoded).unwrap() {
+            crate::decoder::DecodeResult::Channel(c) => c,
+            crate::decoder::DecodeResult::Node(_) => panic!("Expected Channel"),
+        };
         assert!(decoded.lora.is_some());
     }
 }

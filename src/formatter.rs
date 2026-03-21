@@ -1,11 +1,58 @@
 use colored::{Color, Colorize};
-use meshurl::models::{ChannelRole, LoRaInfo, MeshtasticConfig, MeshtasticDisplay};
+use meshurl::models::{ChannelRole, LoRaInfo, MeshtasticConfig, MeshtasticDisplay, NodeInfo};
 
 pub fn print_config(config: &MeshtasticConfig) {
     print_channels(&config.channels);
 
     if let Some(lora) = &config.lora {
         print_lora(lora);
+    }
+}
+
+pub fn print_node_info(node: &NodeInfo) {
+    let title = "Node Information".color(Color::Cyan).bold();
+    println!("{}\n", title);
+
+    println!(
+        "    {} {}",
+        "Node Num:".color(Color::White),
+        node.num.to_string().color(Color::BrightCyan).bold()
+    );
+    println!(
+        "    {} {}",
+        "Name:".color(Color::White),
+        node.long_name.color(Color::BrightWhite)
+    );
+    println!(
+        "    {} {}",
+        "Short:".color(Color::White),
+        node.short_name.color(Color::BrightWhite)
+    );
+    println!(
+        "    {} {}",
+        "Model:".color(Color::White),
+        node.hw_model.color(Color::BrightGreen)
+    );
+    println!(
+        "    {} {}",
+        "Role:".color(Color::White),
+        node.role.to_string().color(Color::BrightGreen)
+    );
+
+    if let Some(ref pk) = node.public_key {
+        println!(
+            "    {} {}",
+            "Public Key:".color(Color::White),
+            pk.color(Color::BrightMagenta)
+        );
+    }
+
+    if node.is_unmessagable {
+        println!(
+            "    {} {}",
+            "Unmessagable:".color(Color::White),
+            "Yes".color(Color::Red)
+        );
     }
 }
 

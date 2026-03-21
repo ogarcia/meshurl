@@ -175,8 +175,11 @@ fn main() {
 
     match cli {
         Cli::Decode { url } => match decode_url(&url) {
-            Ok(config) => {
+            Ok(meshurl::DecodeResult::Channel(config)) => {
                 formatter::print_config(&config);
+            }
+            Ok(meshurl::DecodeResult::Node(node)) => {
+                formatter::print_node_info(&node);
             }
             Err(e) => {
                 formatter::print_error(&e.to_string());

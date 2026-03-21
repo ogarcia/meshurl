@@ -1,4 +1,4 @@
-use meshurl::decoder::decode_url;
+use meshurl::decoder::{decode_url, DecodeResult};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Style},
@@ -316,12 +316,24 @@ pub fn handle_decode_keys(
             if *state.editing_url {
                 let text = state.textarea.lines().first().map_or("", |l| l.as_str());
                 if !text.is_empty() {
-                    let result = decode_url(text).map_err(|e| e.to_string());
-                    *state.config_result = Some(result.clone());
-                    if result.is_ok() {
-                        state.channels_list_state.select(Some(0));
-                        *state.lora_scroll = 0;
-                        *state.editing_url = false;
+                    match decode_url(text) {
+                        Ok(DecodeResult::Channel(config)) => {
+                            *state.config_result = Some(Ok(config));
+                            state.channels_list_state.select(Some(0));
+                            *state.lora_scroll = 0;
+                            *state.editing_url = false;
+                        }
+                        Ok(DecodeResult::Node(_)) => {
+                            *state.config_result = Some(Err(
+                                "Node URLs are not supported in TUI decode mode. Use CLI instead."
+                                    .to_string(),
+                            ));
+                            *state.editing_url = false;
+                        }
+                        Err(e) => {
+                            *state.config_result = Some(Err(e.to_string()));
+                            *state.editing_url = false;
+                        }
                     }
                 }
             } else {

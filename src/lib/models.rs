@@ -4,6 +4,59 @@ use meshtastic_protobufs::meshtastic::config::{
 };
 use meshtastic_protobufs::meshtastic::{ChannelSettings, ModuleSettings};
 
+/// User role in the Meshtastic mesh network.
+///
+/// Represents the role/function of a node in the mesh.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UserRole {
+    /// Regular client node (default)
+    Client,
+    /// Client with muted audio
+    ClientMute,
+    /// Client with silent mode enabled
+    ClientSilent,
+    /// Tracker node (position reporting)
+    Tracker,
+    /// Sensor node
+    Sensor,
+    /// Administrator node
+    Admin,
+    /// Router node for mesh routing
+    Router,
+    /// Unknown or unrecognized role
+    Unknown,
+}
+
+impl From<i32> for UserRole {
+    fn from(value: i32) -> Self {
+        match value {
+            0 => UserRole::Client,
+            1 => UserRole::ClientMute,
+            2 => UserRole::ClientSilent,
+            3 => UserRole::Tracker,
+            4 => UserRole::Sensor,
+            5 => UserRole::Admin,
+            7 => UserRole::Router,
+            _ => UserRole::Unknown,
+        }
+    }
+}
+
+impl std::fmt::Display for UserRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UserRole::Client => write!(f, "Client"),
+            UserRole::ClientMute => write!(f, "ClientMute"),
+            UserRole::ClientSilent => write!(f, "ClientSilent"),
+            UserRole::Tracker => write!(f, "Tracker"),
+            UserRole::Sensor => write!(f, "Sensor"),
+            UserRole::Admin => write!(f, "Admin"),
+            UserRole::Router => write!(f, "Router"),
+            UserRole::Unknown => write!(f, "Unknown"),
+        }
+    }
+}
+
 /// Provides consistent string representation for Meshtastic enums.
 /// Converts protobuf enum variants to standardized uppercase string format.
 pub trait MeshtasticDisplay {
@@ -83,8 +136,101 @@ pub const POSITION_OPTIONS: &[(&str, u32)] = &[
 /// Default PSK value (base64 encoded single byte [1]).
 pub const DEFAULT_PSK: &str = "AQ==";
 
-/// Base URL for Meshtastic channel configuration.
-pub const MESHTASTIC_URL_BASE: &str = "https://meshtastic.org/e/#";
+/// Base URL for Meshtastic channel configuration URLs.
+pub const MESHTASTIC_CHANNEL_URL_BASE: &str = "https://meshtastic.org/e/#";
+
+/// Base URL for Meshtastic node info URLs.
+pub const MESHTASTIC_NODE_URL_BASE: &str = "https://meshtastic.org/v/#";
+
+/// Node information decoded from a Meshtastic node info URL.
+///
+/// This struct contains the information present in `/v/` URLs,
+/// which includes user identity and device information.
+/// Note: Position data is not included in node URLs.
+#[derive(Debug, Clone)]
+pub struct NodeInfo {
+    /// Unique node number assigned by the mesh
+    pub num: u32,
+    /// Full name of the node owner
+    pub long_name: String,
+    /// Short name (typically 3-4 characters) for display on OLED
+    pub short_name: String,
+    /// Hardware model identifier
+    pub hw_model: String,
+    /// Role of this node in the mesh
+    pub role: UserRole,
+    /// Public key for encryption (base64 encoded, if present)
+    pub public_key: Option<String>,
+    /// Whether this node accepts direct messages
+    pub is_unmessagable: bool,
+}
+
+impl NodeInfo {
+    /// Creates a `NodeInfo` from a protobuf `NodeInfo` message.
+    ///
+    /// # Arguments
+    /// * `node` - Reference to the protobuf NodeInfo message
+    ///
+    /// # Example
+    /// ```ignore
+    /// use meshtastic_protobufs::meshtastic::NodeInfo as PbNodeInfo;
+    /// use meshurl::models::NodeInfo;
+    ///
+    /// let pb_node = PbNodeInfo::decode(data).unwrap();
+    /// let node_info = NodeInfo::from_pb(&pb_node);
+    /// ```
+    pub fn from_pb(node: &meshtastic_protobufs::meshtastic::NodeInfo) -> Self {
+        let (long_name, short_name, hw_model, role, public_key, is_unmessagable) =
+            if let Some(ref user) = node.user {
+                let role = UserRole::from(user.role);
+                let public_key = if user.public_key.is_empty() {
+                    None
+                } else {
+                    Some(STANDARD.encode(&user.public_key))
+                };
+                let is_unmessagable = user.is_unmessagable.unwrap_or(false);
+                (
+                    user.long_name.clone(),
+                    user.short_name.clone(),
+                    hardware_model_to_string(user.hw_model),
+                    role,
+                    public_key,
+                    is_unmessagable,
+                )
+            } else {
+                (
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    UserRole::Unknown,
+                    None,
+                    false,
+                )
+            };
+
+        Self {
+            num: node.num,
+            long_name,
+            short_name,
+            hw_model,
+            role,
+            public_key,
+            is_unmessagable,
+        }
+    }
+}
+
+/// Converts a hardware model integer to its string representation.
+/// Uses the meshtastic-protobufs HardwareModel enum.
+fn hardware_model_to_string(model: i32) -> String {
+    use meshtastic_protobufs::meshtastic::HardwareModel;
+    use std::convert::TryFrom;
+
+    if let Ok(hw_model) = HardwareModel::try_from(model) {
+        return hw_model.as_str_name().to_string();
+    }
+    format!("Unknown ({})", model)
+}
 
 /// Generates a random 32-byte PSK encoded in base64.
 /// Uses a simple linear congruential generator seeded with current time.
@@ -131,6 +277,7 @@ pub enum PskMode {
 }
 
 impl PskMode {
+    /// Returns true if this PSK mode is None (no encryption).
     pub fn is_none(&self) -> bool {
         matches!(self, PskMode::None)
     }
@@ -314,6 +461,7 @@ impl std::str::FromStr for ChannelInfo {
 }
 
 impl ChannelRole {
+    /// Returns the string representation of the channel role.
     pub fn as_str(&self) -> &'static str {
         match self {
             ChannelRole::Primary => "PRIMARY",
@@ -564,6 +712,7 @@ impl MeshtasticConfig {
         MeshtasticConfig { channels, lora }
     }
 
+    /// Creates a new empty MeshtasticConfig with no channels or LoRa settings.
     pub fn new() -> Self {
         MeshtasticConfig {
             channels: Vec::new(),
@@ -860,5 +1009,30 @@ mod tests {
             PskMode::Passphrase("test".to_string()).to_string(),
             "Passphrase"
         );
+    }
+
+    #[test]
+    fn test_node_info_from_url() {
+        use crate::decoder::{decode_url, DecodeResult};
+
+        let url = "#CAESJQoLIXRlc3QwMDAwMDESEEdhbGljaWEgQ2FsaWRhZGUaBPCfkJk";
+        let result = decode_url(url).expect("valid URL");
+
+        match result {
+            DecodeResult::Node(node) => {
+                assert_eq!(node.num, 1);
+                assert_eq!(node.long_name, "Galicia Calidade");
+                assert_eq!(node.short_name, "🐙");
+                assert!(node.public_key.is_none());
+                assert!(!node.is_unmessagable);
+            }
+            DecodeResult::Channel(_) => panic!("Expected Node, got Channel"),
+        }
+    }
+
+    #[test]
+    fn test_meshtastic_url_constants() {
+        assert_eq!(MESHTASTIC_CHANNEL_URL_BASE, "https://meshtastic.org/e/#");
+        assert_eq!(MESHTASTIC_NODE_URL_BASE, "https://meshtastic.org/v/#");
     }
 }
