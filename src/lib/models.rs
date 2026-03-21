@@ -172,12 +172,40 @@ impl NodeInfo {
     /// * `node` - Reference to the protobuf NodeInfo message
     ///
     /// # Example
-    /// ```ignore
-    /// use meshtastic_protobufs::meshtastic::NodeInfo as PbNodeInfo;
+    /// ```
+    /// use meshtastic_protobufs::meshtastic::{NodeInfo as PbNodeInfo, User};
     /// use meshurl::models::NodeInfo;
     ///
-    /// let pb_node = PbNodeInfo::decode(data).unwrap();
+    /// let user = User {
+    ///     id: "!test".to_string(),
+    ///     long_name: "Test Node".to_string(),
+    ///     short_name: "TST".to_string(),
+    ///     macaddr: vec![],
+    ///     hw_model: 0,
+    ///     is_licensed: false,
+    ///     role: 0,
+    ///     public_key: vec![],
+    ///     is_unmessagable: None,
+    /// };
+    ///
+    /// let pb_node = PbNodeInfo {
+    ///     num: 12345,
+    ///     user: Some(user),
+    ///     position: None,
+    ///     snr: 0.0,
+    ///     last_heard: 0,
+    ///     device_metrics: None,
+    ///     channel: 0,
+    ///     via_mqtt: false,
+    ///     hops_away: None,
+    ///     is_favorite: false,
+    ///     is_ignored: false,
+    ///     is_key_manually_verified: false,
+    /// };
+    ///
     /// let node_info = NodeInfo::from_pb(&pb_node);
+    /// assert_eq!(node_info.num, 12345);
+    /// assert_eq!(node_info.long_name, "Test Node");
     /// ```
     pub fn from_pb(node: &meshtastic_protobufs::meshtastic::NodeInfo) -> Self {
         let (long_name, short_name, hw_model, role, public_key, is_unmessagable) =

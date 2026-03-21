@@ -38,8 +38,7 @@ pub fn encode_url_short(config: &MeshtasticConfig) -> Result<String, EncodeError
     Ok(format!("#{}", base64))
 }
 
-pub use meshtastic_protobufs::meshtastic::config::lo_ra_config::ModemPreset;
-pub use meshtastic_protobufs::meshtastic::config::lo_ra_config::RegionCode;
+pub use meshtastic_protobufs::meshtastic::config::lo_ra_config::{ModemPreset, RegionCode};
 
 /// Converts a string region name to RegionCode.
 pub fn region_code_from_str(s: &str) -> RegionCode {
