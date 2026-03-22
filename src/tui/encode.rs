@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Paragraph},
     Frame,
 };
 use ratatui_textarea::{CursorMove, TextArea};
@@ -353,6 +353,7 @@ pub fn draw_encode_mode(f: &mut Frame, state: &mut EncodeDrawState) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Double)
                 .border_style(Style::default().fg(Color::DarkGray)),
         );
     f.render_widget(title, chunks[0]);

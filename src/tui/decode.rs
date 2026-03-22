@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Style},
     text::Line,
-    widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Padding, Paragraph},
     Frame,
 };
 use ratatui_textarea::TextArea;
@@ -36,6 +36,7 @@ pub fn draw_decode_mode(f: &mut Frame, state: &mut DecodeDrawState) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Double)
                 .border_style(Style::default().fg(Color::DarkGray)),
         );
     f.render_widget(title, chunks[0]);
