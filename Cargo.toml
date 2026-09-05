@@ -19,13 +19,13 @@ name = "meshurl"
 path = "src/lib/mod.rs"
 
 [dependencies]
-meshtastic_protobufs = "2.7"
-base64 = "0.22"
-clap = { version = "4.5", features = ["derive"] }
-prost = "0.13"
-colored = "2.1"
+base64 = "0.23"
 bytes = "1"
-sha2 = "0.10"
+clap = { version = "4.5", features = ["derive"] }
+colored = "3.1"
+crossterm = "0.29"
+meshtastic_protobufs = "2.7"
+prost = "0.13"
 ratatui = "0.30"
-ratatui-textarea = "0.8"
-crossterm = "0.28"
+ratatui-textarea = "0.9"
+sha2 = "0.11"
