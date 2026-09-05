@@ -8,7 +8,7 @@ adheres to [Semantic Versioning][semver].
 [keepachangelog]: https://keepachangelog.com/en/1.1.0/
 [semver]: https://semver.org/spec/v2.0.0.html
 
-## [0.5.0] - unreleased
+## [0.5.0] - 2026-09-05
 
 An audit of the whole codebase, covering key generation, several panics, and
 the fidelity of what is encoded and displayed.
