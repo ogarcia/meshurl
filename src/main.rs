@@ -83,7 +83,7 @@ struct LoRaArgs {
     #[arg(long, help = "Disable PA fan")]
     pa_fan_disabled: bool,
 
-    #[arg(long = "no-ignore-mqtt", help = "Allow MQTT messages", action = clap::ArgAction::SetFalse, default_value = "true")]
+    #[arg(long, help = "Ignore messages that arrived over MQTT")]
     ignore_mqtt: bool,
 
     #[arg(long, help = "Allow MQTT")]

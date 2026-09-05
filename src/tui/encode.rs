@@ -3,7 +3,7 @@ use meshurl::encoder::{ModemPreset, RegionCode, encode_url};
 use meshurl::models::{
     ChannelInfo, ChannelRole, DEFAULT_PSK, LoRaInfo, MODEM_PRESETS, MeshtasticDisplay,
     POSITION_OPTIONS, PskType, REGION_CODES, generate_random_psk, get_preset_params,
-    hash_phrase_to_psk,
+    hash_phrase_to_psk, validate_channel_name,
 };
 use ratatui::{
     Frame,
@@ -139,7 +139,8 @@ impl LoRaPopupState {
             sx126x_rx_boosted_gain: false,
             override_duty_cycle: false,
             pa_fan_disabled: false,
-            ignore_mqtt: true,
+            // Matches the firmware default: MQTT traffic is not ignored.
+            ignore_mqtt: false,
             ok_mqtt: false,
             selected_field: 0,
         }
@@ -271,15 +272,6 @@ impl ChannelPopupState {
         self.name_textarea.move_cursor(CursorMove::End);
     }
 
-    pub fn finish_editing_name(&mut self) {
-        self.name = self
-            .name_textarea
-            .lines()
-            .first()
-            .map_or(String::new(), |l| l.to_string());
-        self.editing_name = false;
-    }
-
     pub fn cancel_editing_name(&mut self) {
         self.name_textarea = TextArea::default();
         self.editing_name = false;
@@ -327,6 +319,7 @@ impl ChannelPopupState {
 
     pub fn to_channel_info(&self, default_index: usize) -> Result<(usize, ChannelInfo), String> {
         let index = self.channel_index.unwrap_or(default_index);
+        validate_channel_name(&self.name)?;
         let (psk, psk_type) = self.resolve_psk()?;
 
         Ok((
@@ -1369,7 +1362,21 @@ pub fn handle_popup_keys(
 
     if state.editing_name {
         if matches!(key.code, KeyCode::Enter) {
-            state.finish_editing_name();
+            let entered = state
+                .name_textarea
+                .lines()
+                .first()
+                .map_or(String::new(), |l| l.to_string());
+
+            // Report the overlong name while the field is still open, rather
+            // than letting it fail later on save.
+            if let Err(message) = validate_channel_name(&entered) {
+                show_toast(toast, toast_timer, &message, false);
+                return None;
+            }
+
+            state.name = entered;
+            state.editing_name = false;
         }
         return None;
     }
@@ -1703,6 +1710,86 @@ mod tests {
 
         assert_eq!(popup.psk_mode, PskModeKind::Passphrase);
         assert!(popup.psk_value.is_empty());
+    }
+
+    #[test]
+    fn an_overlong_name_is_refused_on_save() {
+        let mut popup = ChannelPopupState::new();
+        popup.name = "EsteNombreEsDemasiadoLargo".to_string();
+
+        let error = popup
+            .to_channel_info(0)
+            .expect_err("an overlong name is refused");
+
+        assert!(error.contains("maximum is 12"));
+    }
+
+    #[test]
+    fn an_overlong_name_is_reported_while_editing() {
+        let mut popup = ChannelPopupState::new();
+        let mut toast = None;
+        let mut toast_timer = 0;
+
+        popup.selected_field = 0;
+        handle_popup_keys(
+            KeyEvent::from(KeyCode::Enter),
+            &mut popup,
+            &mut toast,
+            &mut toast_timer,
+        );
+        assert!(popup.editing_name);
+
+        popup.name_textarea = TextArea::new(vec!["EsteNombreEsDemasiadoLargo".to_string()]);
+        handle_popup_keys(
+            KeyEvent::from(KeyCode::Enter),
+            &mut popup,
+            &mut toast,
+            &mut toast_timer,
+        );
+
+        // The field stays open and the name is not taken.
+        assert!(popup.editing_name);
+        assert!(popup.name.is_empty());
+        assert!(
+            toast
+                .expect("the failure is reported")
+                .text
+                .contains("maximum is 12")
+        );
+    }
+
+    #[test]
+    fn a_name_within_the_limit_is_taken() {
+        let mut popup = ChannelPopupState::new();
+        let mut toast = None;
+        let mut toast_timer = 0;
+
+        popup.selected_field = 0;
+        handle_popup_keys(
+            KeyEvent::from(KeyCode::Enter),
+            &mut popup,
+            &mut toast,
+            &mut toast_timer,
+        );
+        popup.name_textarea = TextArea::new(vec!["Galicia".to_string()]);
+        handle_popup_keys(
+            KeyEvent::from(KeyCode::Enter),
+            &mut popup,
+            &mut toast,
+            &mut toast_timer,
+        );
+
+        assert!(!popup.editing_name);
+        assert_eq!(popup.name, "Galicia");
+        assert!(toast.is_none());
+    }
+
+    #[test]
+    fn mqtt_traffic_is_not_ignored_by_default() {
+        // The firmware default is false; meshurl used to force it on.
+        let lora = LoRaPopupState::new().to_lora_info();
+
+        assert!(!lora.ignore_mqtt);
     }
 
     #[test]

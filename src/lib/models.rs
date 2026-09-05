@@ -177,6 +177,27 @@ pub const POSITION_OPTIONS: &[(&str, u32)] = &[
     ("Precise", 32),
 ];
 
+/// Longest channel name the firmware stores, in bytes.
+///
+/// The limit is on bytes, not characters, so a name made of multi-byte
+/// characters runs out of room sooner than its length suggests.
+pub const MAX_CHANNEL_NAME_BYTES: usize = 12;
+
+/// Checks a channel name against the firmware limit.
+///
+/// Anything longer is truncated by the device, so a URL carrying it promises a
+/// name the radio will not use.
+pub fn validate_channel_name(name: &str) -> Result<(), String> {
+    let length = name.len();
+    if length > MAX_CHANNEL_NAME_BYTES {
+        return Err(format!(
+            "Channel name is {} bytes, the maximum is {}",
+            length, MAX_CHANNEL_NAME_BYTES
+        ));
+    }
+    Ok(())
+}
+
 /// Default PSK value (base64 encoded single byte [1]).
 pub const DEFAULT_PSK: &str = "AQ==";
 
@@ -497,6 +518,10 @@ impl std::str::FromStr for ChannelInfo {
                 "muted" | "mute" => muted = true,
                 _ => return Err(format!("Unknown option: {}", key)),
             }
+        }
+
+        if let Some(name) = name.as_deref() {
+            validate_channel_name(name)?;
         }
 
         let (name, psk) = if is_default
@@ -1072,6 +1097,38 @@ mod tests {
     }
 
     #[test]
+    fn test_channel_name_within_the_limit_is_accepted() {
+        assert!(validate_channel_name("").is_ok());
+        assert!(validate_channel_name("Galicia").is_ok());
+        // Exactly at the limit.
+        assert!(validate_channel_name("123456789012").is_ok());
+    }
+
+    #[test]
+    fn test_channel_name_over_the_limit_is_refused() {
+        let error = validate_channel_name("1234567890123").unwrap_err();
+        assert_eq!(error, "Channel name is 13 bytes, the maximum is 12");
+    }
+
+    #[test]
+    fn test_channel_name_limit_counts_bytes_not_characters() {
+        // Five characters, but fifteen bytes: the firmware limit is on bytes.
+        let name = "\u{1f419}\u{1f419}\u{1f419}";
+        assert_eq!(name.chars().count(), 3);
+        assert_eq!(name.len(), 12);
+        assert!(validate_channel_name(name).is_ok());
+
+        let longer = "\u{1f419}\u{1f419}\u{1f419}\u{1f419}";
+        assert!(validate_channel_name(longer).is_err());
+    }
+
+    #[test]
+    fn test_channel_info_refuses_an_overlong_name() {
+        let result: Result<ChannelInfo, _> = "name=EsteNombreEsDemasiadoLargo".parse();
+        assert!(result.unwrap_err().contains("maximum is 12"));
+    }
+
+    #[test]
     fn test_channel_info_with_uplink_downlink() {
         let channel: ChannelInfo = "n=TestChannel,up,down".parse().unwrap();
         assert!(channel.uplink_enabled);
@@ -1125,8 +1182,9 @@ mod tests {
 
     #[test]
     fn test_channel_info_with_special_chars_in_name() {
-        let channel: ChannelInfo = "n=Test_Channel-123".parse().unwrap();
-        assert_eq!(channel.name, "Test_Channel-123");
+        // Kept within the 12 byte channel name limit.
+        let channel: ChannelInfo = "n=Test_Ch-123".parse().unwrap();
+        assert_eq!(channel.name, "Test_Ch-123");
     }
 
     #[test]
