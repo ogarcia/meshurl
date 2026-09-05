@@ -320,6 +320,39 @@ impl ChannelPopupState {
     }
 }
 
+/// Renumbers channels after they have been reordered or removed.
+///
+/// Both the index and the role derive from the position in the list, so they
+/// have to be rewritten together every time that position changes.
+fn reindex_channels(channels: &mut [ChannelInfo]) {
+    for (i, channel) in channels.iter_mut().enumerate() {
+        channel.index = i;
+        channel.role = if i == 0 {
+            ChannelRole::Primary
+        } else {
+            ChannelRole::Secondary
+        };
+    }
+}
+
+/// Moves the channel selection by `delta`, keeping it inside the list.
+///
+/// An unbounded selection is not just a cosmetic problem: the reorder and edit
+/// keys index the channel list with it.
+fn move_channel_selection(list_state: &mut ListState, len: usize, delta: isize) {
+    if len == 0 {
+        list_state.select(None);
+        return;
+    }
+
+    let last = len - 1;
+    let next = match list_state.selected() {
+        Some(current) => current.min(last).saturating_add_signed(delta).min(last),
+        None => 0,
+    };
+    list_state.select(Some(next));
+}
+
 fn get_popup_fields(psk_mode: &PskMode) -> Vec<&'static str> {
     let mut fields = vec!["Name", "PSK Mode"];
 
@@ -689,19 +722,15 @@ pub fn handle_encode_keys(
             true
         }
         KeyCode::Char('+') => {
+            // `s + 1 < len` rather than `s < len - 1`: the latter underflows on
+            // an empty list, which Tab can select into.
             if let Some(idx) = state
                 .encode_channels_state
                 .selected()
-                .and_then(|s| (s < state.encode_config.channels.len() - 1).then_some(s))
+                .and_then(|s| (s + 1 < state.encode_config.channels.len()).then_some(s))
             {
                 state.encode_config.channels.swap(idx, idx + 1);
-                for (i, ch) in state.encode_config.channels.iter_mut().enumerate() {
-                    ch.role = if i == 0 {
-                        ChannelRole::Primary
-                    } else {
-                        ChannelRole::Secondary
-                    };
-                }
+                reindex_channels(&mut state.encode_config.channels);
                 state.encode_channels_state.select(Some(idx + 1));
             }
             false
@@ -710,16 +739,10 @@ pub fn handle_encode_keys(
             if let Some(idx) = state
                 .encode_channels_state
                 .selected()
-                .and_then(|s| (s > 0).then_some(s))
+                .and_then(|s| (s > 0 && s < state.encode_config.channels.len()).then_some(s))
             {
                 state.encode_config.channels.swap(idx, idx - 1);
-                for (i, ch) in state.encode_config.channels.iter_mut().enumerate() {
-                    ch.role = if i == 0 {
-                        ChannelRole::Primary
-                    } else {
-                        ChannelRole::Secondary
-                    };
-                }
+                reindex_channels(&mut state.encode_config.channels);
                 state.encode_channels_state.select(Some(idx - 1));
             }
             false
@@ -731,14 +754,7 @@ pub fn handle_encode_keys(
                 .and_then(|s| (s < state.encode_config.channels.len()).then_some(s))
             {
                 state.encode_config.channels.remove(selected);
-                for (i, channel) in state.encode_config.channels.iter_mut().enumerate() {
-                    channel.index = i;
-                    channel.role = if i == 0 {
-                        ChannelRole::Primary
-                    } else {
-                        ChannelRole::Secondary
-                    };
-                }
+                reindex_channels(&mut state.encode_config.channels);
                 if state.encode_config.channels.is_empty() {
                     state.encode_channels_state.select(None);
                 } else if selected >= state.encode_config.channels.len() {
@@ -767,13 +783,11 @@ pub fn handle_encode_keys(
         }
         KeyCode::Up => {
             if *state.active_panel == ActivePanel::Channels {
-                if let Some(selected) = state.encode_channels_state.selected() {
-                    if selected > 0 {
-                        state.encode_channels_state.select(Some(selected - 1));
-                    }
-                } else {
-                    state.encode_channels_state.select(Some(0));
-                }
+                move_channel_selection(
+                    state.encode_channels_state,
+                    state.encode_config.channels.len(),
+                    -1,
+                );
             } else if *state.active_panel == ActivePanel::Lora {
                 *state.lora_scroll = state.lora_scroll.saturating_sub(1);
             }
@@ -781,11 +795,11 @@ pub fn handle_encode_keys(
         }
         KeyCode::Down => {
             if *state.active_panel == ActivePanel::Channels {
-                if let Some(selected) = state.encode_channels_state.selected() {
-                    state.encode_channels_state.select(Some(selected + 1));
-                } else {
-                    state.encode_channels_state.select(Some(0));
-                }
+                move_channel_selection(
+                    state.encode_channels_state,
+                    state.encode_config.channels.len(),
+                    1,
+                );
             } else if *state.active_panel == ActivePanel::Lora {
                 *state.lora_scroll = (*state.lora_scroll + 1).min(*state.lora_max_scroll);
             }
@@ -1448,5 +1462,161 @@ pub fn handle_popup_keys(
                 _ => None,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::app::ActivePanel;
+    use meshurl::models::MeshtasticConfig;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+
+    /// Feeds a key to the encode handler with the channel panel focused.
+    fn press(config: &mut MeshtasticConfig, list_state: &mut ListState, code: KeyCode) {
+        let mut active_panel = ActivePanel::Channels;
+        let mut encoded_url = None;
+        let mut channel_popup = None;
+        let mut lora_popup = None;
+        let mut lora_scroll = 0;
+        let mut lora_max_scroll = 0;
+        let mut toast = None;
+        let mut toast_timer = 0;
+
+        let mut state = EncodeState {
+            encode_config: config,
+            encoded_url: &mut encoded_url,
+            active_panel: &mut active_panel,
+            encode_channels_state: list_state,
+            channel_popup: &mut channel_popup,
+            lora_popup: &mut lora_popup,
+            lora_scroll: &mut lora_scroll,
+            lora_max_scroll: &mut lora_max_scroll,
+            toast: &mut toast,
+            toast_timer: &mut toast_timer,
+        };
+
+        handle_encode_keys(KeyEvent::from(code), &mut state);
+    }
+
+    fn config_with_channels(count: usize) -> MeshtasticConfig {
+        let mut config = MeshtasticConfig::new();
+        for i in 0..count {
+            let mut channel: ChannelInfo = "default".parse().expect("valid channel spec");
+            channel.name = format!("ch{}", i);
+            config.channels.push(channel);
+        }
+        reindex_channels(&mut config.channels);
+        config
+    }
+
+    #[test]
+    fn move_up_on_empty_list_does_not_panic() {
+        let mut config = MeshtasticConfig::new();
+        let mut list_state = ListState::default();
+        // Tab into the channel panel selects index 0 even with no channels.
+        list_state.select(Some(0));
+
+        press(&mut config, &mut list_state, KeyCode::Char('+'));
+
+        assert!(config.channels.is_empty());
+    }
+
+    #[test]
+    fn move_down_on_empty_list_does_not_panic() {
+        let mut config = MeshtasticConfig::new();
+        let mut list_state = ListState::default();
+        list_state.select(Some(0));
+
+        press(&mut config, &mut list_state, KeyCode::Char('-'));
+
+        assert!(config.channels.is_empty());
+    }
+
+    #[test]
+    fn selection_stops_at_the_last_channel() {
+        let mut config = config_with_channels(2);
+        let mut list_state = ListState::default();
+        list_state.select(Some(0));
+
+        for _ in 0..5 {
+            press(&mut config, &mut list_state, KeyCode::Down);
+        }
+
+        assert_eq!(list_state.selected(), Some(1));
+    }
+
+    #[test]
+    fn selection_stops_at_the_first_channel() {
+        let mut config = config_with_channels(2);
+        let mut list_state = ListState::default();
+        list_state.select(Some(1));
+
+        for _ in 0..5 {
+            press(&mut config, &mut list_state, KeyCode::Up);
+        }
+
+        assert_eq!(list_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn reordering_past_the_end_does_not_panic() {
+        let mut config = config_with_channels(2);
+        let mut list_state = ListState::default();
+        // A stale selection left over from a longer list.
+        list_state.select(Some(5));
+
+        press(&mut config, &mut list_state, KeyCode::Char('-'));
+
+        assert_eq!(config.channels.len(), 2);
+    }
+
+    #[test]
+    fn reordering_renumbers_channels() {
+        let mut config = config_with_channels(3);
+        let mut list_state = ListState::default();
+        list_state.select(Some(0));
+
+        press(&mut config, &mut list_state, KeyCode::Char('+'));
+
+        assert_eq!(list_state.selected(), Some(1));
+        assert_eq!(config.channels[0].name, "ch1");
+        assert_eq!(config.channels[1].name, "ch0");
+        // Index and role follow the position, not the channel.
+        for (i, channel) in config.channels.iter().enumerate() {
+            assert_eq!(channel.index, i);
+            let expected_role = if i == 0 {
+                ChannelRole::Primary
+            } else {
+                ChannelRole::Secondary
+            };
+            assert_eq!(channel.role, expected_role);
+        }
+    }
+
+    #[test]
+    fn deleting_renumbers_remaining_channels() {
+        let mut config = config_with_channels(3);
+        let mut list_state = ListState::default();
+        list_state.select(Some(0));
+
+        press(&mut config, &mut list_state, KeyCode::Char('d'));
+
+        assert_eq!(config.channels.len(), 2);
+        assert_eq!(config.channels[0].name, "ch1");
+        assert_eq!(config.channels[0].index, 0);
+        assert_eq!(config.channels[0].role, ChannelRole::Primary);
+    }
+
+    #[test]
+    fn deleting_the_last_channel_clears_the_selection() {
+        let mut config = config_with_channels(1);
+        let mut list_state = ListState::default();
+        list_state.select(Some(0));
+
+        press(&mut config, &mut list_state, KeyCode::Char('d'));
+
+        assert!(config.channels.is_empty());
+        assert_eq!(list_state.selected(), None);
     }
 }
