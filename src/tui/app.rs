@@ -413,6 +413,24 @@ mod tests {
         handle_key(state, KeyEvent::new(code, modifiers))
     }
 
+    /// Encode mode with the channel editing popup open.
+    fn with_channel_popup() -> AppState {
+        AppState {
+            app_mode: AppMode::Encode,
+            channel_popup: Some(ChannelPopupState::new()),
+            ..Default::default()
+        }
+    }
+
+    /// Encode mode with the LoRa popup open.
+    fn with_lora_popup() -> AppState {
+        AppState {
+            app_mode: AppMode::Encode,
+            lora_popup: Some(LoRaPopupState::new()),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn q_quits() {
         let mut state = AppState::default();
@@ -439,8 +457,10 @@ mod tests {
 
     #[test]
     fn q_does_not_quit_while_typing_a_url() {
-        let mut state = AppState::default();
-        state.editing_url = true;
+        let mut state = AppState {
+            editing_url: true,
+            ..Default::default()
+        };
 
         let flow = press(&mut state, KeyCode::Char('q'));
 
@@ -450,9 +470,7 @@ mod tests {
 
     #[test]
     fn mode_keys_do_not_reach_through_the_channel_popup() {
-        let mut state = AppState::default();
-        state.app_mode = AppMode::Encode;
-        state.channel_popup = Some(ChannelPopupState::new());
+        let mut state = with_channel_popup();
 
         // '1' used to switch to decode mode and strand the popup in the state.
         assert!(press(&mut state, KeyCode::Char('1')).is_continue());
@@ -463,9 +481,7 @@ mod tests {
 
     #[test]
     fn mode_keys_do_not_reach_through_the_lora_popup() {
-        let mut state = AppState::default();
-        state.app_mode = AppMode::Encode;
-        state.lora_popup = Some(LoRaPopupState::new());
+        let mut state = with_lora_popup();
 
         assert!(press(&mut state, KeyCode::Char('2')).is_continue());
         assert!(press(&mut state, KeyCode::Char('m')).is_continue());
@@ -476,9 +492,7 @@ mod tests {
 
     #[test]
     fn q_does_not_quit_from_inside_a_popup() {
-        let mut state = AppState::default();
-        state.app_mode = AppMode::Encode;
-        state.lora_popup = Some(LoRaPopupState::new());
+        let mut state = with_lora_popup();
 
         let flow = press(&mut state, KeyCode::Char('q'));
 
@@ -488,9 +502,7 @@ mod tests {
 
     #[test]
     fn ctrl_c_quits_even_from_inside_a_popup() {
-        let mut state = AppState::default();
-        state.app_mode = AppMode::Encode;
-        state.lora_popup = Some(LoRaPopupState::new());
+        let mut state = with_lora_popup();
 
         let flow = press_with(&mut state, KeyCode::Char('c'), KeyModifiers::CONTROL);
 
@@ -499,9 +511,7 @@ mod tests {
 
     #[test]
     fn esc_closes_a_popup_before_quitting() {
-        let mut state = AppState::default();
-        state.app_mode = AppMode::Encode;
-        state.lora_popup = Some(LoRaPopupState::new());
+        let mut state = with_lora_popup();
 
         assert!(press(&mut state, KeyCode::Esc).is_continue());
         assert!(state.lora_popup.is_none());
