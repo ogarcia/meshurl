@@ -745,20 +745,18 @@ impl From<&ChannelSettings> for ChannelInfo {
 }
 
 /// Converts a protobuf LoRaConfig to LoRaInfo.
-/// Automatically detects if a preset was used by comparing the config values
-/// with known preset parameters.
+///
+/// A configuration that carries no radio parameters is taken to use its preset:
+/// the firmware leaves them unset in that case, and proto3 reports an unset
+/// numeric field as zero.
 impl From<&LoRaConfig> for LoRaInfo {
     fn from(config: &LoRaConfig) -> Self {
         let modem_preset = config.modem_preset();
 
-        let (preset_bw, preset_sf, preset_cr) = get_preset_params(modem_preset);
-
-        let bw_khz = config.bandwidth / 1000;
-        let use_preset = config.use_preset
-            || config.bandwidth == 0
-            || (bw_khz == preset_bw
-                && config.spread_factor == preset_sf
-                && config.coding_rate == preset_cr);
+        // `bandwidth` is already in kHz, matching get_preset_params. Dividing it
+        // by 1000 first, as this used to, compared kHz against zero and made the
+        // outcome depend on values no device sends.
+        let use_preset = config.use_preset || config.bandwidth == 0;
 
         let (bandwidth, spread_factor, coding_rate) = if use_preset {
             get_preset_params(modem_preset)
@@ -1094,6 +1092,69 @@ mod tests {
         // says the feature is off.
         let channel: ChannelInfo = "n=Test,pos=0".parse().unwrap();
         assert_eq!(channel.position_precision, None);
+    }
+
+    /// Builds a LoRaConfig the way a device would serialise it.
+    #[cfg(test)]
+    fn lora_config(
+        use_preset: bool,
+        bandwidth: u32,
+        spread_factor: u32,
+        coding_rate: u32,
+    ) -> LoRaConfig {
+        LoRaConfig {
+            use_preset,
+            modem_preset: ModemPreset::LongFast as i32,
+            bandwidth,
+            spread_factor,
+            coding_rate,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_lora_preset_config_fills_in_the_preset_parameters() {
+        // With a preset in use the firmware leaves the parameters unset.
+        let info = LoRaInfo::from(&lora_config(true, 0, 0, 0));
+
+        assert!(info.use_preset);
+        assert_eq!(
+            (info.bandwidth, info.spread_factor, info.coding_rate),
+            (250, 11, 5)
+        );
+    }
+
+    #[test]
+    fn test_lora_manual_config_is_kept_verbatim() {
+        // Values taken from a real URL: 62 kHz, SF7, CR 4/6.
+        let info = LoRaInfo::from(&lora_config(false, 62, 7, 6));
+
+        assert!(!info.use_preset);
+        assert_eq!(
+            (info.bandwidth, info.spread_factor, info.coding_rate),
+            (62, 7, 6)
+        );
+    }
+
+    #[test]
+    fn test_manual_parameters_matching_a_preset_stay_manual() {
+        // These are exactly LongFast, but the config says it is not using a
+        // preset and that is what it means. Second-guessing it rewrote the flag.
+        let info = LoRaInfo::from(&lora_config(false, 250, 11, 5));
+
+        assert!(!info.use_preset);
+        assert_eq!(
+            (info.bandwidth, info.spread_factor, info.coding_rate),
+            (250, 11, 5)
+        );
+    }
+
+    #[test]
+    fn test_bandwidth_is_read_as_kilohertz() {
+        // 250 is 250 kHz, not 250 Hz: dividing by 1000 first zeroed it out.
+        let info = LoRaInfo::from(&lora_config(false, 250, 11, 5));
+
+        assert_eq!(info.bandwidth, 250);
     }
 
     #[test]
