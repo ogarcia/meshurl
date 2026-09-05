@@ -11,7 +11,7 @@ use ratatui_textarea::TextArea;
 use crate::tui::app::{ActivePanel, DecodeDrawState, DecodeState};
 use crate::tui::widgets::{
     channel_list_item, channel_scroll_indicator, channel_total_lines, lora_info_lines,
-    lora_scroll_info,
+    lora_scroll_info, node_info_lines,
 };
 
 pub fn draw_decode_mode(f: &mut Frame, state: &mut DecodeDrawState) {
@@ -84,142 +84,123 @@ pub fn draw_decode_mode(f: &mut Frame, state: &mut DecodeDrawState) {
         f.render_widget(url_para, chunks[1]);
     }
 
-    let channels_title = match state.config_result {
-        Some(Ok(config)) => format!(" 📋 Channels ({} found) ", config.channels.len()),
+    // A node URL carries a device description, not channels, so the middle
+    // panel changes what it is showing rather than refusing the URL.
+    let decoded_node = match state.config_result {
+        Some(Ok(DecodeResult::Node(node))) => Some(node),
+        _ => None,
+    };
+    let decoded_config = match state.config_result {
+        Some(Ok(DecodeResult::Channel(config))) => Some(config),
+        _ => None,
+    };
+
+    let main_title = match state.config_result {
+        Some(Ok(DecodeResult::Channel(config))) => {
+            format!(" 📋 Channels ({} found) ", config.channels.len())
+        }
+        Some(Ok(DecodeResult::Node(_))) => " 📇 Node ".to_string(),
         Some(Err(_)) => " 📋 Channels (error) ".to_string(),
         None => " 📋 Channels ".to_string(),
     };
-    let channels_border_color = if state.active_panel == ActivePanel::Channels {
+    let main_border_color = if state.active_panel == ActivePanel::Channels {
         Color::Yellow
     } else {
         Color::DarkGray
     };
+    let main_block = || {
+        Block::default()
+            .title(main_title.clone())
+            .borders(Borders::ALL)
+            .padding(Padding::new(1, 1, 1, 1))
+            .border_style(Style::default().fg(main_border_color))
+    };
 
-    match state.config_result {
-        Some(Ok(config)) => {
-            let items: Vec<ListItem> = config
-                .channels
-                .iter()
-                .enumerate()
-                .map(|(i, ch)| channel_list_item(i, ch))
-                .collect();
+    if let Some(config) = decoded_config {
+        let items: Vec<ListItem> = config
+            .channels
+            .iter()
+            .enumerate()
+            .map(|(i, ch)| channel_list_item(i, ch))
+            .collect();
 
-            let total_lines = channel_total_lines(&config.channels);
-            let block_height = chunks[2].height;
-            let selected_idx = state.channels_list_state.selected().unwrap_or(0);
+        let total_lines = channel_total_lines(&config.channels);
+        let block_height = chunks[2].height;
+        let selected_idx = state.channels_list_state.selected().unwrap_or(0);
 
-            let scroll_indicator = channel_scroll_indicator(
-                total_lines,
-                block_height,
-                selected_idx,
-                true, // has scroll state in decode
-                state.channels_scroll,
+        let scroll_indicator = channel_scroll_indicator(
+            total_lines,
+            block_height,
+            selected_idx,
+            true, // has scroll state in decode
+            state.channels_scroll,
+        );
+
+        let channels_block =
+            main_block().title_bottom(Line::from(scroll_indicator).right_aligned());
+
+        let mut list = List::new(items).block(channels_block);
+        if state.active_panel == ActivePanel::Channels {
+            list = list.highlight_style(
+                Style::default()
+                    .bg(Color::Rgb(0x1a, 0x1a, 0x1a))
+                    .add_modifier(ratatui::style::Modifier::BOLD),
             );
-
-            let channels_block = Block::default()
-                .title(channels_title)
-                .title_bottom(Line::from(scroll_indicator).right_aligned())
-                .borders(Borders::ALL)
-                .padding(Padding::new(1, 1, 1, 1))
-                .border_style(Style::default().fg(channels_border_color));
-
-            let list = List::new(items).block(channels_block.clone());
-            if state.active_panel == ActivePanel::Channels {
-                let list = list.highlight_style(
-                    Style::default()
-                        .bg(Color::Rgb(0x1a, 0x1a, 0x1a))
-                        .add_modifier(ratatui::style::Modifier::BOLD),
-                );
-                f.render_stateful_widget(list, chunks[2], state.channels_list_state);
-            } else {
-                f.render_stateful_widget(list, chunks[2], state.channels_list_state);
-            }
         }
-
-        Some(Err(e)) => {
-            let channels_block = Block::default()
-                .title(channels_title)
-                .borders(Borders::ALL)
-                .padding(Padding::new(1, 1, 1, 1))
-                .border_style(Style::default().fg(channels_border_color));
-            let error = Paragraph::new(format!("Error: {}", e))
-                .style(Style::default().fg(Color::Red))
-                .block(channels_block);
-            f.render_widget(error, chunks[2]);
-        }
-        None => {
-            let channels_block = Block::default()
-                .title(channels_title)
-                .borders(Borders::ALL)
-                .padding(Padding::new(1, 1, 1, 1))
-                .border_style(Style::default().fg(channels_border_color));
-            let help = Paragraph::new("Enter a URL above and press Decode")
-                .style(Style::default().fg(Color::DarkGray))
-                .block(channels_block);
-            f.render_widget(help, chunks[2]);
-        }
+        f.render_stateful_widget(list, chunks[2], state.channels_list_state);
+    } else if let Some(node) = decoded_node {
+        let node_para = Paragraph::new(node_info_lines(node)).block(main_block());
+        f.render_widget(node_para, chunks[2]);
+    } else {
+        let (text, style) = match state.config_result {
+            Some(Err(e)) => (format!("Error: {}", e), Style::default().fg(Color::Red)),
+            _ => (
+                "Enter a URL above and press Decode".to_string(),
+                Style::default().fg(Color::DarkGray),
+            ),
+        };
+        let para = Paragraph::new(text).style(style).block(main_block());
+        f.render_widget(para, chunks[2]);
     }
 
     let lora_title = " 📻 LoRa Config ";
+    let lora_border_color = if state.active_panel == ActivePanel::Lora {
+        Color::Yellow
+    } else {
+        Color::DarkGray
+    };
+    let lora_block = || {
+        Block::default()
+            .title(lora_title)
+            .borders(Borders::ALL)
+            .padding(Padding::new(1, 1, 1, 1))
+            .border_style(Style::default().fg(lora_border_color))
+    };
 
-    match state.config_result {
-        Some(Ok(config)) => {
-            if let Some(lora) = &config.lora {
-                let scroll_info = lora_scroll_info(lora, chunks[3].height, state.lora_scroll);
-                *state.lora_max_scroll = scroll_info.max_scroll;
+    match decoded_config.and_then(|config| config.lora.as_ref()) {
+        Some(lora) => {
+            let scroll_info = lora_scroll_info(lora, chunks[3].height, state.lora_scroll);
+            *state.lora_max_scroll = scroll_info.max_scroll;
 
-                let all_lines = lora_info_lines(lora);
-                let start_idx = scroll_info.clamped_scroll as usize;
-                let end_idx = (start_idx + scroll_info.visible_lines).min(all_lines.len());
-                let visible_lines: Vec<Line> = all_lines[start_idx..end_idx].to_vec();
+            let all_lines = lora_info_lines(lora);
+            let start_idx = scroll_info.clamped_scroll as usize;
+            let end_idx = (start_idx + scroll_info.visible_lines).min(all_lines.len());
+            let visible_lines: Vec<Line> = all_lines[start_idx..end_idx].to_vec();
 
-                let lora_border_color = if state.active_panel == ActivePanel::Lora {
-                    Color::Yellow
-                } else {
-                    Color::DarkGray
-                };
-
-                let lora_block = Block::default()
-                    .title(lora_title)
-                    .title_bottom(Line::from(scroll_info.indicator).right_aligned())
-                    .borders(Borders::ALL)
-                    .padding(Padding::new(1, 1, 1, 1))
-                    .border_style(Style::default().fg(lora_border_color));
-
-                let lora_para = Paragraph::new(visible_lines).block(lora_block);
-                f.render_widget(lora_para, chunks[3]);
-            } else {
-                let lora_border_color = if state.active_panel == ActivePanel::Lora {
-                    Color::Yellow
-                } else {
-                    Color::DarkGray
-                };
-                let lora_block = Block::default()
-                    .title(lora_title)
-                    .borders(Borders::ALL)
-                    .padding(Padding::new(1, 1, 1, 1))
-                    .border_style(Style::default().fg(lora_border_color));
-                let help = Paragraph::new("No LoRa config in URL")
-                    .style(Style::default().fg(Color::DarkGray))
-                    .block(lora_block);
-                f.render_widget(help, chunks[3]);
-            }
+            let block =
+                lora_block().title_bottom(Line::from(scroll_info.indicator).right_aligned());
+            f.render_widget(Paragraph::new(visible_lines).block(block), chunks[3]);
         }
-        _ => {
-            let lora_border_color = if state.active_panel == ActivePanel::Lora {
-                Color::Yellow
-            } else {
-                Color::DarkGray
+        None => {
+            let help = match state.config_result {
+                Some(Ok(DecodeResult::Node(_))) => "Node URLs carry no LoRa config",
+                Some(Ok(DecodeResult::Channel(_))) => "No LoRa config in URL",
+                _ => "Decode a URL to see LoRa config",
             };
-            let lora_block = Block::default()
-                .title(lora_title)
-                .borders(Borders::ALL)
-                .padding(Padding::new(1, 1, 1, 1))
-                .border_style(Style::default().fg(lora_border_color));
-            let help = Paragraph::new("Decode a URL to see LoRa config")
+            let para = Paragraph::new(help)
                 .style(Style::default().fg(Color::DarkGray))
-                .block(lora_block);
-            f.render_widget(help, chunks[3]);
+                .block(lora_block());
+            f.render_widget(para, chunks[3]);
         }
     }
 
@@ -302,7 +283,7 @@ pub fn handle_decode_keys(
         }
         KeyCode::Down => {
             if *state.active_panel == ActivePanel::Channels {
-                if let Some(Ok(cfg)) = state.config_result {
+                if let Some(Ok(DecodeResult::Channel(cfg))) = state.config_result {
                     let max = cfg.channels.len().saturating_sub(1);
                     let current = state.channels_list_state.selected().unwrap_or(0);
                     if current < max {
@@ -320,24 +301,14 @@ pub fn handle_decode_keys(
                 let text = state.textarea.lines().first().map_or("", |l| l.as_str());
                 if !text.is_empty() {
                     match decode_url(text) {
-                        Ok(DecodeResult::Channel(config)) => {
-                            *state.config_result = Some(Ok(config));
+                        Ok(decoded) => {
                             state.channels_list_state.select(Some(0));
                             *state.lora_scroll = 0;
-                            *state.editing_url = false;
+                            *state.config_result = Some(Ok(decoded));
                         }
-                        Ok(DecodeResult::Node(_)) => {
-                            *state.config_result = Some(Err(
-                                "Node URLs are not supported in TUI decode mode. Use CLI instead."
-                                    .to_string(),
-                            ));
-                            *state.editing_url = false;
-                        }
-                        Err(e) => {
-                            *state.config_result = Some(Err(e.to_string()));
-                            *state.editing_url = false;
-                        }
+                        Err(e) => *state.config_result = Some(Err(e.to_string())),
                     }
+                    *state.editing_url = false;
                 }
             } else {
                 *state.editing_url = true;
@@ -379,4 +350,112 @@ pub fn handle_decode_tab(
         channels_list_state.select(Some(0));
     }
     *active_panel = new_panel;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::app::DecodeState;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    use ratatui::widgets::ListState;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    /// A real node URL, as shared by the Meshtastic app.
+    const NODE_URL: &str =
+        "https://meshtastic.org/v/#CAESJQoLIXRlc3QwMDAwMDESEEdhbGljaWEgQ2FsaWRhZGUaBPCfkJk";
+    const CHANNEL_URL: &str = "https://meshtastic.org/e/#CgsSAQEoATABOgIIDQ";
+
+    /// Types `url` into the URL field and decodes it, as a user would.
+    fn decode(url: &str) -> Option<Result<DecodeResult, String>> {
+        let mut active_panel = ActivePanel::Url;
+        let mut textarea = TextArea::new(vec![url.to_string()]);
+        let mut config_result = None;
+        let mut editing_url = true;
+        let mut channels_scroll = 0;
+        let mut lora_scroll = 0;
+        let mut lora_max_scroll = 0;
+        let mut channels_list_state = ListState::default();
+
+        let mut state = DecodeState {
+            active_panel: &mut active_panel,
+            textarea: &mut textarea,
+            config_result: &mut config_result,
+            editing_url: &mut editing_url,
+            channels_scroll: &mut channels_scroll,
+            lora_scroll: &mut lora_scroll,
+            lora_max_scroll: &mut lora_max_scroll,
+            channels_list_state: &mut channels_list_state,
+        };
+        handle_decode_keys(KeyEvent::from(KeyCode::Enter), &mut state);
+
+        config_result
+    }
+
+    fn render(result: Option<Result<DecodeResult, String>>) -> String {
+        let mut channels_list_state = ListState::default();
+        let mut lora_max_scroll = 0;
+        let textarea = TextArea::default();
+        let mut draw_state = DecodeDrawState {
+            textarea: &textarea,
+            config_result: &result,
+            active_panel: ActivePanel::Channels,
+            editing_url: false,
+            channels_scroll: 0,
+            channels_list_state: &mut channels_list_state,
+            lora_scroll: 0,
+            lora_max_scroll: &mut lora_max_scroll,
+        };
+
+        let mut terminal = Terminal::new(TestBackend::new(100, 40)).expect("test backend starts");
+        terminal
+            .draw(|f| draw_decode_mode(f, &mut draw_state))
+            .expect("decode mode renders");
+
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn a_node_url_decodes_instead_of_being_refused() {
+        // This used to report "Node URLs are not supported in TUI decode mode".
+        let result = decode(NODE_URL);
+
+        match result {
+            Some(Ok(DecodeResult::Node(node))) => {
+                assert_eq!(node.long_name, "Galicia Calidade");
+            }
+            other => panic!("expected a node, got {:?}", other.map(|r| r.is_ok())),
+        }
+    }
+
+    #[test]
+    fn a_node_url_renders_its_details() {
+        let rendered = render(decode(NODE_URL));
+
+        assert!(rendered.contains("Node"), "the panel is titled Node");
+        assert!(rendered.contains("Galicia Calidade"), "the name is shown");
+        assert!(
+            rendered.contains("Node URLs carry no LoRa config"),
+            "the LoRa panel explains itself"
+        );
+    }
+
+    #[test]
+    fn a_channel_url_still_renders_its_channels() {
+        let rendered = render(decode(CHANNEL_URL));
+
+        assert!(rendered.contains("Channels (1 found)"));
+    }
+
+    #[test]
+    fn an_invalid_url_still_reports_the_error() {
+        let rendered = render(decode("https://meshtastic.org/e/#"));
+
+        assert!(rendered.contains("Error:"));
+    }
 }

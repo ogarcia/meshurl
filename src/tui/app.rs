@@ -1,3 +1,4 @@
+use meshurl::decoder::DecodeResult;
 use meshurl::models::MeshtasticConfig;
 use ratatui::crossterm::cursor::Show;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -36,7 +37,7 @@ pub enum ActivePanel {
 pub struct AppState {
     pub app_mode: AppMode,
     pub textarea: TextArea<'static>,
-    pub config_result: Option<Result<MeshtasticConfig, String>>,
+    pub config_result: Option<Result<DecodeResult, String>>,
     pub encode_config: MeshtasticConfig,
     pub encoded_url: Option<String>,
     pub active_panel: ActivePanel,
@@ -54,7 +55,7 @@ pub struct AppState {
 pub struct DecodeState<'a> {
     pub active_panel: &'a mut ActivePanel,
     pub textarea: &'a mut TextArea<'static>,
-    pub config_result: &'a mut Option<Result<MeshtasticConfig, String>>,
+    pub config_result: &'a mut Option<Result<DecodeResult, String>>,
     pub editing_url: &'a mut bool,
     pub channels_scroll: &'a mut usize,
     pub lora_scroll: &'a mut u16,
@@ -76,7 +77,7 @@ pub struct EncodeState<'a> {
 
 pub struct DecodeDrawState<'a> {
     pub textarea: &'a TextArea<'static>,
-    pub config_result: &'a Option<Result<MeshtasticConfig, String>>,
+    pub config_result: &'a Option<Result<DecodeResult, String>>,
     pub active_panel: ActivePanel,
     pub editing_url: bool,
     pub channels_scroll: usize,
@@ -277,8 +278,12 @@ fn handle_key(state: &mut AppState, key: KeyEvent) -> ControlFlow<()> {
                     state.app_mode = AppMode::Encode;
                     state.active_panel = ActivePanel::Channels;
                 }
+                // Only a channel configuration can be carried into encode mode;
+                // node URLs describe a device, not channels.
                 KeyCode::Char('m') | KeyCode::Char('M') => match state.config_result.as_ref() {
-                    Some(Ok(config)) if state.app_mode == AppMode::Decode => {
+                    Some(Ok(DecodeResult::Channel(config)))
+                        if state.app_mode == AppMode::Decode =>
+                    {
                         state.encode_config = config.clone();
                         state.app_mode = AppMode::Encode;
                         state.active_panel = ActivePanel::Channels;

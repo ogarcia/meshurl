@@ -1,5 +1,5 @@
 use meshurl::models::{
-    ChannelInfo, ChannelRole, LoRaInfo, MeshtasticDisplay, POSITION_OPTIONS, PskType,
+    ChannelInfo, ChannelRole, LoRaInfo, MeshtasticDisplay, NodeInfo, POSITION_OPTIONS, PskType,
 };
 use std::time::{Duration, Instant};
 
@@ -230,6 +230,51 @@ pub fn lora_scroll_info(lora: &LoRaInfo, block_height: u16, scroll_offset: u16) 
         clamped_scroll,
         indicator,
     }
+}
+
+/// Renders the contents of a node info URL.
+pub fn node_info_lines(node: &NodeInfo) -> Vec<Line<'_>> {
+    let label = Style::default().fg(Color::DarkGray);
+    let value = Style::default().fg(Color::White);
+
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("Node Num: ", label),
+            Span::styled(node.num.to_string(), Style::default().fg(Color::Cyan)),
+        ]),
+        Line::from(vec![
+            Span::styled("Name: ", label),
+            Span::styled(node.long_name.as_str(), value),
+        ]),
+        Line::from(vec![
+            Span::styled("Short: ", label),
+            Span::styled(node.short_name.as_str(), value),
+        ]),
+        Line::from(vec![
+            Span::styled("Model: ", label),
+            Span::styled(node.hw_model.as_str(), Style::default().fg(Color::Green)),
+        ]),
+        Line::from(vec![
+            Span::styled("Role: ", label),
+            Span::styled(node.role.to_string(), Style::default().fg(Color::Green)),
+        ]),
+    ];
+
+    if let Some(public_key) = &node.public_key {
+        lines.push(Line::from(vec![
+            Span::styled("Public Key: ", label),
+            Span::styled(public_key.as_str(), Style::default().fg(Color::Magenta)),
+        ]));
+    }
+
+    if node.is_unmessagable {
+        lines.push(Line::from(vec![
+            Span::styled("Unmessagable: ", label),
+            Span::styled("Yes", Style::default().fg(Color::Red)),
+        ]));
+    }
+
+    lines
 }
 
 pub fn lora_info_lines(lora: &LoRaInfo) -> Vec<Line<'_>> {
