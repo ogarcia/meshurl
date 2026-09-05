@@ -22,6 +22,9 @@ use crate::tui::widgets::{
     lora_info_lines, lora_scroll_info, truncate_to_columns,
 };
 
+/// Channels a Meshtastic configuration can hold.
+const MAX_CHANNELS: usize = 8;
+
 /// Preferred width of the channel editing popup.
 const CHANNEL_POPUP_WIDTH: u16 = 35;
 /// Preferred width of the LoRa editing popup.
@@ -659,32 +662,42 @@ pub fn draw_encode_mode(f: &mut Frame, state: &mut EncodeDrawState) {
     );
     f.render_widget(url_para, chunks[3]);
 
-    let copy_hint = if state.encoded_url.is_some() {
-        "  [C] Copy"
-    } else {
-        ""
-    };
+    // Only list what the focused panel can actually do right now.
+    let mut keys: Vec<&str> = vec!["[1] Decode", "[2] Encode", "[Tab/Shift+Tab] Switch"];
 
-    let can_reorder = state.encode_config.channels.len() >= 2;
-    let reorder_hint = if can_reorder { " [+]/[-] Move" } else { "" };
-    let footer_text = match state.active_panel {
-        ActivePanel::Channels => format!(
-            "[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [D] Delete{}  [E] LoRa  [G] Generate{}  [Del] Clear",
-            reorder_hint, copy_hint
-        ),
-        ActivePanel::Lora => format!(
-            "[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [E] LoRa  [G] Generate{}  [Del] Clear",
-            copy_hint
-        ),
-        ActivePanel::UrlEncode => format!(
-            "[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [E] LoRa  [G] Generate{}  [Del] Clear",
-            copy_hint
-        ),
-        ActivePanel::Url => format!(
-            "[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [E] LoRa  [G] Generate{}  [Del] Clear",
-            copy_hint
-        ),
-    };
+    let has_channels = !state.encode_config.channels.is_empty();
+
+    if state.active_panel == ActivePanel::Channels {
+        if state.encode_config.channels.len() < MAX_CHANNELS {
+            keys.push("[A] Add");
+        }
+        if has_channels {
+            keys.push("[Enter] Edit");
+            keys.push("[D] Delete");
+        }
+        if state.encode_config.channels.len() >= 2 {
+            keys.push("[+]/[-] Move");
+        }
+    } else if state.active_panel != ActivePanel::Lora
+        && state.encode_config.channels.len() < MAX_CHANNELS
+    {
+        keys.push("[A] Add");
+    }
+
+    keys.push("[E] LoRa");
+
+    if has_channels {
+        keys.push("[G] Generate");
+    }
+    if state.encoded_url.is_some() {
+        keys.push("[C] Copy");
+    }
+
+    keys.push("[Del] Clear");
+    keys.push("[Q] Quit");
+
+    let footer_text = keys.join("  ");
+
     let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::DarkGray));
     f.render_widget(footer, chunks[4]);
 
@@ -812,7 +825,7 @@ pub fn handle_encode_keys(
                     };
                     state.encode_config.channels[idx] = channel;
                     state.encode_channels_state.select(Some(idx));
-                } else if state.encode_config.channels.len() < 8 {
+                } else if state.encode_config.channels.len() < MAX_CHANNELS {
                     channel.index = state.encode_config.channels.len();
                     channel.role = if channel.index == 0 {
                         ChannelRole::Primary
@@ -869,7 +882,7 @@ pub fn handle_encode_keys(
             true
         }
         KeyCode::Char('a') | KeyCode::Char('A') => {
-            if state.encode_config.channels.len() < 8 {
+            if state.encode_config.channels.len() < MAX_CHANNELS {
                 *state.channel_popup = Some(ChannelPopupState::new());
             }
             true

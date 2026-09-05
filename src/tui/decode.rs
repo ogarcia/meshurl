@@ -225,34 +225,36 @@ pub fn draw_decode_mode(f: &mut Frame, state: &mut DecodeDrawState) {
 
     let has_valid_config = matches!(state.config_result, Some(Ok(_)));
 
-    let footer_text = match state.active_panel {
+    // Only list keys that do something on the focused panel: the previous
+    // footer advertised [M] with nothing decoded and covered a panel that this
+    // mode never focuses.
+    let mut keys: Vec<&str> = vec!["[1] Decode", "[2] Encode"];
+
+    match state.active_panel {
+        ActivePanel::Url if state.editing_url => {
+            keys.push("[Enter] Decode");
+            keys.push("[Esc] Exit edit");
+        }
         ActivePanel::Url => {
-            if state.editing_url {
-                "[1] Decode  [2] Encode  [Enter] Decode  [Esc] Exit edit"
-            } else if has_valid_config {
-                "[1] Decode  [2] Encode  [M] Modify  [Enter] Edit  [Del] Clear  [Esc] Quit"
-            } else {
-                "[1] Decode  [2] Encode  [Enter] Edit  [Del] Clear  [Esc] Quit"
-            }
-        }
-        ActivePanel::Channels => {
+            keys.push("[Enter] Edit");
             if has_valid_config {
-                "[1] Decode  [2] Encode  [M] Modify  [Tab/Shift+Tab] Switch  [↑↓] Scroll  [Del] Clear  [Esc] Quit"
-            } else {
-                "[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [↑↓] Scroll  [Del] Clear  [Esc] Quit"
+                keys.push("[M] Modify");
             }
+            keys.push("[Del] Clear");
+            keys.push("[Q] Quit");
         }
-        ActivePanel::Lora => {
+        _ => {
+            keys.push("[Tab/Shift+Tab] Switch");
+            keys.push("[↑↓] Scroll");
             if has_valid_config {
-                "[1] Decode  [2] Encode  [M] Modify  [Tab/Shift+Tab] Switch  [↑↓] Scroll  [Del] Clear  [Esc] Quit"
-            } else {
-                "[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [↑↓] Scroll  [Del] Clear  [Esc] Quit"
+                keys.push("[M] Modify");
             }
+            keys.push("[Del] Clear");
+            keys.push("[Q] Quit");
         }
-        ActivePanel::UrlEncode => {
-            "[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [G] Generate  [C] Copy  [Del] Clear"
-        }
-    };
+    }
+
+    let footer_text = keys.join("  ");
 
     let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::DarkGray));
     f.render_widget(footer, chunks[4]);

@@ -239,7 +239,7 @@ pub fn lora_info_lines(lora: &LoRaInfo) -> Vec<Line<'_>> {
     let enabled_color = Color::Green;
     let disabled_color = Color::Red;
 
-    let (bandwidth, spread_factor, _coding_rate) = lora.modem.parameters();
+    let (bandwidth, spread_factor, coding_rate) = lora.modem.parameters();
 
     let all_lines = vec![
         Line::from(vec![
@@ -299,6 +299,13 @@ pub fn lora_info_lines(lora: &LoRaInfo) -> Vec<Line<'_>> {
         Line::from(vec![
             Span::styled("Spread Factor: ", Style::default().fg(Color::DarkGray)),
             Span::styled(spread_factor.to_string(), Style::default().fg(value_color)),
+        ]),
+        Line::from(vec![
+            Span::styled("Coding Rate: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!("4/{}", coding_rate),
+                Style::default().fg(value_color),
+            ),
         ]),
         Line::from(vec![
             Span::styled("Hop Limit: ", Style::default().fg(Color::DarkGray)),

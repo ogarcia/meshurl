@@ -1,6 +1,6 @@
 use meshurl::models::MeshtasticConfig;
 use ratatui::crossterm::cursor::Show;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -8,6 +8,7 @@ use ratatui::crossterm::{
 use ratatui::{Frame, Terminal, backend::CrosstermBackend, widgets::ListState};
 use ratatui_textarea::TextArea;
 use std::io;
+use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
 /// How long to wait for an event when nothing is pending.
@@ -18,13 +19,13 @@ const IDLE_POLL: Duration = Duration::from_secs(1);
 
 pub use crate::tui::widgets::{ToastMessage, render_toast};
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AppMode {
     Decode,
     Encode,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ActivePanel {
     Url,
     Channels,
@@ -94,6 +95,14 @@ pub struct EncodeDrawState<'a> {
     pub lora_max_scroll: &'a mut u16,
 }
 
+impl AppState {
+    /// Whether a popup is currently claiming the keyboard.
+    fn has_popup(&self) -> bool {
+        self.app_mode == AppMode::Encode
+            && (self.channel_popup.is_some() || self.lora_popup.is_some())
+    }
+}
+
 impl Default for AppState {
     fn default() -> Self {
         Self {
@@ -114,6 +123,14 @@ impl Default for AppState {
             toast: None,
         }
     }
+}
+
+/// Keys that work everywhere, including while a popup is open.
+///
+/// Esc is handled separately: a popup takes it to close itself.
+fn is_global_key(key: KeyEvent) -> bool {
+    matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C'))
+        && key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -187,147 +204,11 @@ fn run_inner(
             // Anything that reaches us changes the screen, a resize included.
             needs_redraw = true;
 
-            let Event::Key(key) = event else {
-                continue;
-            };
-            if key.kind == KeyEventKind::Press {
-                {
-                    let is_editing_in_url =
-                        state.active_panel == ActivePanel::Url && state.editing_url;
-                    let is_decode_mode = state.app_mode == AppMode::Decode;
-
-                    if is_decode_mode
-                        && is_editing_in_url
-                        && !matches!(key.code, KeyCode::Esc | KeyCode::Enter)
-                    {
-                        state.textarea.input(key);
-                    } else {
-                        let is_editing_channel_name = state.app_mode == AppMode::Encode
-                            && state.channel_popup.as_ref().is_some_and(|p| p.editing_name);
-
-                        let is_editing_channel_psk = state.app_mode == AppMode::Encode
-                            && state.channel_popup.as_ref().is_some_and(|p| p.editing_psk);
-
-                        if is_editing_channel_name
-                            && !matches!(key.code, KeyCode::Esc | KeyCode::Enter)
-                        {
-                            if let Some(popup) = state.channel_popup.as_mut() {
-                                popup.name_textarea.input(key);
-                            }
-                        } else if is_editing_channel_psk
-                            && !matches!(key.code, KeyCode::Esc | KeyCode::Enter)
-                        {
-                            if let Some(popup) = state.channel_popup.as_mut() {
-                                popup.psk_textarea.input(key);
-                            }
-                        } else {
-                            match key.code {
-                                KeyCode::Char('1') => {
-                                    state.app_mode = AppMode::Decode;
-                                    state.active_panel = ActivePanel::Url;
-                                }
-                                KeyCode::Char('2') => {
-                                    state.app_mode = AppMode::Encode;
-                                    state.active_panel = ActivePanel::Channels;
-                                }
-                                KeyCode::Char('m') | KeyCode::Char('M') => {
-                                    match state.config_result.as_ref() {
-                                        Some(Ok(config)) if state.app_mode == AppMode::Decode => {
-                                            state.encode_config = config.clone();
-                                            state.app_mode = AppMode::Encode;
-                                            state.active_panel = ActivePanel::Channels;
-                                            state.encode_channels_state.select(Some(0));
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                KeyCode::Tab | KeyCode::BackTab => {
-                                    if state.app_mode == AppMode::Encode {
-                                        crate::tui::encode::handle_encode_tab(
-                                            key,
-                                            &mut state.active_panel,
-                                            &mut state.encode_channels_state,
-                                        );
-                                    } else {
-                                        crate::tui::decode::handle_decode_tab(
-                                            key,
-                                            &mut state.active_panel,
-                                            &mut state.channels_list_state,
-                                        );
-                                    }
-                                    state.editing_url = false;
-                                }
-                                KeyCode::Esc => {
-                                    if state.active_panel == ActivePanel::Url && state.editing_url {
-                                        state.editing_url = false;
-                                    } else if state.app_mode == AppMode::Encode
-                                        && state
-                                            .channel_popup
-                                            .as_ref()
-                                            .is_some_and(|p| p.editing_name)
-                                    {
-                                        if let Some(popup) = state.channel_popup.as_mut() {
-                                            popup.cancel_editing_name();
-                                        }
-                                    } else if state.app_mode == AppMode::Encode
-                                        && state
-                                            .channel_popup
-                                            .as_ref()
-                                            .is_some_and(|p| p.editing_psk)
-                                    {
-                                        if let Some(popup) = state.channel_popup.as_mut() {
-                                            popup.cancel_editing_psk();
-                                        }
-                                    } else if state.app_mode == AppMode::Encode
-                                        && state.channel_popup.is_some()
-                                    {
-                                        state.channel_popup = None;
-                                    } else if state.app_mode == AppMode::Encode
-                                        && state.lora_popup.is_some()
-                                    {
-                                        state.lora_popup = None;
-                                    } else {
-                                        return Ok(());
-                                    }
-                                }
-                                _ => {
-                                    if state.app_mode == AppMode::Encode {
-                                        let mut encode_state = EncodeState {
-                                            encode_config: &mut state.encode_config,
-                                            encoded_url: &mut state.encoded_url,
-                                            active_panel: &mut state.active_panel,
-                                            encode_channels_state: &mut state.encode_channels_state,
-                                            channel_popup: &mut state.channel_popup,
-                                            lora_popup: &mut state.lora_popup,
-                                            lora_scroll: &mut state.lora_scroll,
-                                            lora_max_scroll: &mut state.lora_max_scroll,
-                                            toast: &mut state.toast,
-                                        };
-                                        crate::tui::encode::handle_encode_keys(
-                                            key,
-                                            &mut encode_state,
-                                        );
-                                    } else {
-                                        let mut decode_state = DecodeState {
-                                            active_panel: &mut state.active_panel,
-                                            textarea: &mut state.textarea,
-                                            config_result: &mut state.config_result,
-                                            editing_url: &mut state.editing_url,
-                                            channels_scroll: &mut state.channels_scroll,
-                                            lora_scroll: &mut state.lora_scroll,
-                                            lora_max_scroll: &mut state.lora_max_scroll,
-                                            channels_list_state: &mut state.channels_list_state,
-                                        };
-                                        crate::tui::decode::handle_decode_keys(
-                                            key,
-                                            &mut decode_state,
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            if let Event::Key(key) = event
+                && key.kind == KeyEventKind::Press
+                && handle_key(state, key).is_break()
+            {
+                return Ok(());
             }
         }
 
@@ -336,6 +217,147 @@ fn run_inner(
             needs_redraw = true;
         }
     }
+}
+
+/// Applies one key press to the application state.
+///
+/// Returns `ControlFlow::Break` when the key asks to quit. Kept out of the
+/// event loop so the whole keyboard behaviour can be exercised without a
+/// terminal.
+fn handle_key(state: &mut AppState, key: KeyEvent) -> ControlFlow<()> {
+    let is_editing_in_url = state.active_panel == ActivePanel::Url && state.editing_url;
+    let is_decode_mode = state.app_mode == AppMode::Decode;
+
+    if is_decode_mode && is_editing_in_url && !matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
+        state.textarea.input(key);
+    } else {
+        let is_editing_channel_name = state.app_mode == AppMode::Encode
+            && state.channel_popup.as_ref().is_some_and(|p| p.editing_name);
+
+        let is_editing_channel_psk = state.app_mode == AppMode::Encode
+            && state.channel_popup.as_ref().is_some_and(|p| p.editing_psk);
+
+        if is_editing_channel_name && !matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
+            if let Some(popup) = state.channel_popup.as_mut() {
+                popup.name_textarea.input(key);
+            }
+        } else if is_editing_channel_psk && !matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
+            if let Some(popup) = state.channel_popup.as_mut() {
+                popup.psk_textarea.input(key);
+            }
+        } else if state.has_popup() && !is_global_key(key) {
+            // A popup owns the keyboard: switching mode or
+            // quitting from under it used to leave the popup
+            // open in the state, waiting on the other screen.
+            let mut encode_state = EncodeState {
+                encode_config: &mut state.encode_config,
+                encoded_url: &mut state.encoded_url,
+                active_panel: &mut state.active_panel,
+                encode_channels_state: &mut state.encode_channels_state,
+                channel_popup: &mut state.channel_popup,
+                lora_popup: &mut state.lora_popup,
+                lora_scroll: &mut state.lora_scroll,
+                lora_max_scroll: &mut state.lora_max_scroll,
+                toast: &mut state.toast,
+            };
+            crate::tui::encode::handle_encode_keys(key, &mut encode_state);
+        } else {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Char('Q') => return ControlFlow::Break(()),
+                KeyCode::Char('c') | KeyCode::Char('C')
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    return ControlFlow::Break(());
+                }
+                KeyCode::Char('1') => {
+                    state.app_mode = AppMode::Decode;
+                    state.active_panel = ActivePanel::Url;
+                }
+                KeyCode::Char('2') => {
+                    state.app_mode = AppMode::Encode;
+                    state.active_panel = ActivePanel::Channels;
+                }
+                KeyCode::Char('m') | KeyCode::Char('M') => match state.config_result.as_ref() {
+                    Some(Ok(config)) if state.app_mode == AppMode::Decode => {
+                        state.encode_config = config.clone();
+                        state.app_mode = AppMode::Encode;
+                        state.active_panel = ActivePanel::Channels;
+                        state.encode_channels_state.select(Some(0));
+                    }
+                    _ => {}
+                },
+                KeyCode::Tab | KeyCode::BackTab => {
+                    if state.app_mode == AppMode::Encode {
+                        crate::tui::encode::handle_encode_tab(
+                            key,
+                            &mut state.active_panel,
+                            &mut state.encode_channels_state,
+                        );
+                    } else {
+                        crate::tui::decode::handle_decode_tab(
+                            key,
+                            &mut state.active_panel,
+                            &mut state.channels_list_state,
+                        );
+                    }
+                    state.editing_url = false;
+                }
+                KeyCode::Esc => {
+                    if state.active_panel == ActivePanel::Url && state.editing_url {
+                        state.editing_url = false;
+                    } else if state.app_mode == AppMode::Encode
+                        && state.channel_popup.as_ref().is_some_and(|p| p.editing_name)
+                    {
+                        if let Some(popup) = state.channel_popup.as_mut() {
+                            popup.cancel_editing_name();
+                        }
+                    } else if state.app_mode == AppMode::Encode
+                        && state.channel_popup.as_ref().is_some_and(|p| p.editing_psk)
+                    {
+                        if let Some(popup) = state.channel_popup.as_mut() {
+                            popup.cancel_editing_psk();
+                        }
+                    } else if state.app_mode == AppMode::Encode && state.channel_popup.is_some() {
+                        state.channel_popup = None;
+                    } else if state.app_mode == AppMode::Encode && state.lora_popup.is_some() {
+                        state.lora_popup = None;
+                    } else {
+                        return ControlFlow::Break(());
+                    }
+                }
+                _ => {
+                    if state.app_mode == AppMode::Encode {
+                        let mut encode_state = EncodeState {
+                            encode_config: &mut state.encode_config,
+                            encoded_url: &mut state.encoded_url,
+                            active_panel: &mut state.active_panel,
+                            encode_channels_state: &mut state.encode_channels_state,
+                            channel_popup: &mut state.channel_popup,
+                            lora_popup: &mut state.lora_popup,
+                            lora_scroll: &mut state.lora_scroll,
+                            lora_max_scroll: &mut state.lora_max_scroll,
+                            toast: &mut state.toast,
+                        };
+                        crate::tui::encode::handle_encode_keys(key, &mut encode_state);
+                    } else {
+                        let mut decode_state = DecodeState {
+                            active_panel: &mut state.active_panel,
+                            textarea: &mut state.textarea,
+                            config_result: &mut state.config_result,
+                            editing_url: &mut state.editing_url,
+                            channels_scroll: &mut state.channels_scroll,
+                            lora_scroll: &mut state.lora_scroll,
+                            lora_max_scroll: &mut state.lora_max_scroll,
+                            channels_list_state: &mut state.channels_list_state,
+                        };
+                        crate::tui::decode::handle_decode_keys(key, &mut decode_state);
+                    }
+                }
+            }
+        }
+    }
+
+    ControlFlow::Continue(())
 }
 
 fn draw(f: &mut Frame, state: &mut AppState) {
@@ -375,5 +397,127 @@ fn draw(f: &mut Frame, state: &mut AppState) {
 
     if let Some(toast) = &state.toast {
         render_toast(f, toast);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::encode::{ChannelPopupState, LoRaPopupState};
+
+    fn press(state: &mut AppState, code: KeyCode) -> ControlFlow<()> {
+        handle_key(state, KeyEvent::from(code))
+    }
+
+    fn press_with(state: &mut AppState, code: KeyCode, modifiers: KeyModifiers) -> ControlFlow<()> {
+        handle_key(state, KeyEvent::new(code, modifiers))
+    }
+
+    #[test]
+    fn q_quits() {
+        let mut state = AppState::default();
+
+        assert!(press(&mut state, KeyCode::Char('q')).is_break());
+        assert!(press(&mut state, KeyCode::Char('Q')).is_break());
+    }
+
+    #[test]
+    fn ctrl_c_quits() {
+        let mut state = AppState::default();
+
+        let flow = press_with(&mut state, KeyCode::Char('c'), KeyModifiers::CONTROL);
+
+        assert!(flow.is_break());
+    }
+
+    #[test]
+    fn esc_still_quits_with_nothing_open() {
+        let mut state = AppState::default();
+
+        assert!(press(&mut state, KeyCode::Esc).is_break());
+    }
+
+    #[test]
+    fn q_does_not_quit_while_typing_a_url() {
+        let mut state = AppState::default();
+        state.editing_url = true;
+
+        let flow = press(&mut state, KeyCode::Char('q'));
+
+        assert!(flow.is_continue());
+        assert_eq!(state.textarea.lines()[0], "q");
+    }
+
+    #[test]
+    fn mode_keys_do_not_reach_through_the_channel_popup() {
+        let mut state = AppState::default();
+        state.app_mode = AppMode::Encode;
+        state.channel_popup = Some(ChannelPopupState::new());
+
+        // '1' used to switch to decode mode and strand the popup in the state.
+        assert!(press(&mut state, KeyCode::Char('1')).is_continue());
+
+        assert_eq!(state.app_mode, AppMode::Encode);
+        assert!(state.channel_popup.is_some());
+    }
+
+    #[test]
+    fn mode_keys_do_not_reach_through_the_lora_popup() {
+        let mut state = AppState::default();
+        state.app_mode = AppMode::Encode;
+        state.lora_popup = Some(LoRaPopupState::new());
+
+        assert!(press(&mut state, KeyCode::Char('2')).is_continue());
+        assert!(press(&mut state, KeyCode::Char('m')).is_continue());
+
+        assert_eq!(state.app_mode, AppMode::Encode);
+        assert!(state.lora_popup.is_some());
+    }
+
+    #[test]
+    fn q_does_not_quit_from_inside_a_popup() {
+        let mut state = AppState::default();
+        state.app_mode = AppMode::Encode;
+        state.lora_popup = Some(LoRaPopupState::new());
+
+        let flow = press(&mut state, KeyCode::Char('q'));
+
+        assert!(flow.is_continue());
+        assert!(state.lora_popup.is_some());
+    }
+
+    #[test]
+    fn ctrl_c_quits_even_from_inside_a_popup() {
+        let mut state = AppState::default();
+        state.app_mode = AppMode::Encode;
+        state.lora_popup = Some(LoRaPopupState::new());
+
+        let flow = press_with(&mut state, KeyCode::Char('c'), KeyModifiers::CONTROL);
+
+        assert!(flow.is_break());
+    }
+
+    #[test]
+    fn esc_closes_a_popup_before_quitting() {
+        let mut state = AppState::default();
+        state.app_mode = AppMode::Encode;
+        state.lora_popup = Some(LoRaPopupState::new());
+
+        assert!(press(&mut state, KeyCode::Esc).is_continue());
+        assert!(state.lora_popup.is_none());
+
+        // A second Esc, with nothing left open, quits.
+        assert!(press(&mut state, KeyCode::Esc).is_break());
+    }
+
+    #[test]
+    fn mode_keys_work_with_no_popup_open() {
+        let mut state = AppState::default();
+
+        assert!(press(&mut state, KeyCode::Char('2')).is_continue());
+        assert_eq!(state.app_mode, AppMode::Encode);
+
+        assert!(press(&mut state, KeyCode::Char('1')).is_continue());
+        assert_eq!(state.app_mode, AppMode::Decode);
     }
 }
