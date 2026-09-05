@@ -43,4 +43,6 @@ pub use models::{
     MeshtasticDisplay, ModemConfig, NodeInfo, POSITION_OPTIONS, PskMode, PskType, REGION_CODES,
     generate_random_psk, get_preset_params, hash_phrase_to_psk, validate_channel_name,
 };
-pub use regions::{presets_for_region, region_supports_preset, region_swap_for_preset};
+pub use regions::{
+    default_preset_for_region, presets_for_region, region_supports_preset, region_swap_for_preset,
+};

@@ -39,9 +39,10 @@ the fidelity of what is encoded and displayed.
   value, rather than making them be cycled through one arrow press at a time.
   The modem list shows each preset's bandwidth, spreading factor and coding
   rate.
-- Saving a LoRa configuration moves the region to the one its preset requires,
-  as the firmware does: choosing NarrowFast on EU_868 saves as EU_N_868. The
-  change is reported in a toast.
+- Choosing a modem preset moves the region to the one it requires, as the
+  firmware does: picking NarrowFast on EU_868 switches to EU_N_868 there and
+  then, and a toast says so. Choosing a region moves the preset the same way,
+  so the two fields never contradict each other.
 - The TUI decodes node (`/v/`) URLs, which it used to refuse.
 - The LoRa popup exposes bandwidth, spreading factor and coding rate for manual
   configurations, and offers `Custom` alongside the presets.
@@ -103,6 +104,8 @@ the fidelity of what is encoded and displayed.
 - Decoding a URL with an empty payload reported success and printed nothing.
 - Mode keys reached through open popups, stranding them in the state.
 - `meshurl decode <url> | head` ended in a "Broken pipe" panic.
+- Esc in the LoRa list overlay closed the whole popup instead of just the list,
+  because the key was acted on twice.
 - Reordering channels with `+`/`-` did not renumber their index.
 
 ### Removed

@@ -70,6 +70,24 @@ pub fn region_supports_preset(region: RegionCode, preset: ModemPreset) -> bool {
     presets_for_region(region).contains(&preset)
 }
 
+/// The preset a region starts on.
+///
+/// Taken from the `default_preset` column of the firmware's region table: most
+/// regions default to LongFast, but the ones with their own profile start on a
+/// preset they actually allow.
+pub fn default_preset_for_region(region: RegionCode) -> ModemPreset {
+    match region {
+        RegionCode::Eu866 => ModemPreset::LiteFast,
+        RegionCode::EuN868
+        | RegionCode::Itu170cm
+        | RegionCode::Itu270cm
+        | RegionCode::Itu370cm
+        | RegionCode::Itu2125cm => ModemPreset::NarrowSlow,
+        RegionCode::Itu12m | RegionCode::Itu22m | RegionCode::Itu32m => ModemPreset::TinyFast,
+        _ => ModemPreset::LongFast,
+    }
+}
+
 /// The EU regions that swap between each other when a preset asks for it.
 ///
 /// Their preset lists do not overlap, so choosing a preset that belongs to a
@@ -199,6 +217,18 @@ mod tests {
             RegionCode::Itu12m,
             ModemPreset::LongFast
         ));
+    }
+
+    #[test]
+    fn every_region_defaults_to_a_preset_it_allows() {
+        for region in crate::models::REGION_CODES {
+            let preset = default_preset_for_region(*region);
+            assert!(
+                region_supports_preset(*region, preset),
+                "{:?} defaults to a preset it does not allow",
+                region
+            );
+        }
     }
 
     #[test]
