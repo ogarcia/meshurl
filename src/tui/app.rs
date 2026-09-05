@@ -1,4 +1,5 @@
 use meshurl::models::MeshtasticConfig;
+use ratatui::crossterm::cursor::Show;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::crossterm::{
     execute,
@@ -112,6 +113,8 @@ impl Default for AppState {
 }
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+    install_panic_hook();
+
     enable_raw_mode()?;
 
     let stdout = io::stdout();
@@ -124,11 +127,32 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let result = run_inner(&mut terminal, &mut state);
 
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    disable_raw_mode()?;
-    terminal.show_cursor()?;
+    restore_terminal();
 
     result
+}
+
+/// Restores the terminal to its original state.
+///
+/// Errors are deliberately ignored: this runs both on the normal exit path and
+/// from the panic hook, where there is nothing useful left to do with them. Every
+/// step is attempted even if an earlier one fails, so a single failure cannot
+/// leave the terminal in raw mode or on the alternate screen.
+fn restore_terminal() {
+    let _ = execute!(io::stdout(), LeaveAlternateScreen, Show);
+    let _ = disable_raw_mode();
+}
+
+/// Installs a panic hook that restores the terminal before reporting the panic.
+///
+/// Without it a panic inside the TUI leaves the user on the alternate screen with
+/// raw mode still enabled, hiding both the panic message and their own shell.
+fn install_panic_hook() {
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore_terminal();
+        previous_hook(info);
+    }));
 }
 
 fn run_inner(
