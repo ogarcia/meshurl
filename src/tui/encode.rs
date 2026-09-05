@@ -13,7 +13,7 @@ use ratatui::{
 };
 use ratatui_textarea::{CursorMove, TextArea};
 use std::io::Write;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::tui::app::{ActivePanel, EncodeDrawState, EncodeState};
 use crate::tui::widgets::{
@@ -639,34 +639,54 @@ pub enum CopyMethod {
     Osc52,
 }
 
+/// Clipboard helpers tried in order, with the arguments each one needs.
+///
+/// All of them read the text from standard input; none takes it as an operand.
+/// A tool that is not installed fails to spawn and is skipped at no cost.
+const CLIPBOARD_TOOLS: &[(&str, &[&str])] = &[
+    ("wl-copy", &[]),
+    ("xclip", &["-selection", "clipboard"]),
+    ("xsel", &["--clipboard", "--input"]),
+    ("pbcopy", &[]),
+    ("clip.exe", &[]),
+];
+
+/// Pipes `text` into a clipboard tool, reporting whether it took it.
+///
+/// Passing the text as an argument instead, as this used to, makes xclip treat
+/// it as a filename and leaves xsel reading the inherited terminal, which in
+/// the TUI is in raw mode.
+fn copy_with_tool(tool: &str, args: &[&str], text: &str) -> bool {
+    let Ok(mut child) = Command::new(tool)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+
+    let Some(mut stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        return false;
+    };
+
+    let written = stdin.write_all(text.as_bytes()).is_ok();
+    // Closing the pipe is what tells the tool it has the whole text.
+    drop(stdin);
+
+    match child.wait() {
+        Ok(status) => written && status.success(),
+        Err(_) => false,
+    }
+}
+
 pub fn copy_to_clipboard(text: &str) -> Result<CopyMethod, String> {
-    if Command::new("wl-copy")
-        .arg(text)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
-        return Ok(CopyMethod::Tool);
-    }
-
-    if Command::new("xclip")
-        .args(["-selection", "clipboard"])
-        .arg(text)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
-        return Ok(CopyMethod::Tool);
-    }
-
-    if Command::new("xsel")
-        .args(["--clipboard", "--input"])
-        .arg(text)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
-        return Ok(CopyMethod::Tool);
+    for (tool, args) in CLIPBOARD_TOOLS {
+        if copy_with_tool(tool, args, text) {
+            return Ok(CopyMethod::Tool);
+        }
     }
 
     use base64::Engine;
@@ -1798,6 +1818,63 @@ mod tests {
         terminal
             .draw(|f| draw_lora_popup(f, &popup, f.area()))
             .expect("popup renders");
+    }
+
+    /// The clipboard helpers are external commands, so these check the
+    /// mechanics against stand-ins that behave the same way: read standard
+    /// input, then report success or failure through the exit status.
+    #[cfg(unix)]
+    mod clipboard {
+        use super::super::copy_with_tool;
+
+        #[test]
+        fn text_is_piped_through_standard_input() {
+            let file = std::env::temp_dir().join("meshurl-clipboard-test");
+            let script = format!("cat > {}", file.display());
+            let text = "https://meshtastic.org/e/#CgsSAQE";
+
+            assert!(copy_with_tool("sh", &["-c", &script], text));
+
+            let written = std::fs::read_to_string(&file).expect("the stand-in wrote the file");
+            let _ = std::fs::remove_file(&file);
+            assert_eq!(written, text);
+        }
+
+        #[test]
+        fn a_tool_that_fails_is_reported_as_failed() {
+            assert!(!copy_with_tool("false", &[], "text"));
+        }
+
+        #[test]
+        fn a_missing_tool_is_skipped() {
+            assert!(!copy_with_tool(
+                "meshurl-no-such-clipboard-tool",
+                &[],
+                "text"
+            ));
+        }
+
+        #[test]
+        fn a_tool_that_ignores_its_input_still_succeeds() {
+            // Closing the pipe early must not be mistaken for a failure.
+            assert!(copy_with_tool("true", &[], "text"));
+        }
+
+        #[test]
+        fn the_arguments_are_passed_before_the_text() {
+            let file = std::env::temp_dir().join("meshurl-clipboard-args-test");
+            let script = format!("echo \"$1\" > {}", file.display());
+
+            assert!(copy_with_tool(
+                "sh",
+                &["-c", &script, "sh", "--clipboard"],
+                "text"
+            ));
+
+            let written = std::fs::read_to_string(&file).expect("the stand-in wrote the file");
+            let _ = std::fs::remove_file(&file);
+            assert_eq!(written.trim(), "--clipboard");
+        }
     }
 
     #[test]
