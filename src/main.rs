@@ -3,8 +3,8 @@ mod tui;
 
 use clap::{Parser, ValueEnum};
 use meshurl::{
-    decode_url, encoder, errors::EncodeError, get_preset_params, ChannelInfo, ChannelRole,
-    LoRaInfo, MeshtasticConfig,
+    ChannelInfo, ChannelRole, LoRaInfo, MeshtasticConfig, decode_url, encoder, errors::EncodeError,
+    get_preset_params,
 };
 
 #[derive(Parser, Debug)]
@@ -238,7 +238,7 @@ fn encode_config(args: &EncodeArgs) -> Result<(MeshtasticConfig, String, String)
 }
 
 fn create_lora_config(args: &LoRaArgs) -> LoRaInfo {
-    use meshurl::{modem_preset_from_str, region_code_from_str, ModemPreset, RegionCode};
+    use meshurl::{ModemPreset, RegionCode, modem_preset_from_str, region_code_from_str};
 
     let has_preset = args.region.is_some() || args.modem_preset.is_some();
     let modem_preset = args

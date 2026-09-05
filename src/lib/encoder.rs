@@ -1,12 +1,12 @@
 //! Meshtastic URL encoder module.
 //! Provides functions to encode Meshtastic configurations into URLs.
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use meshtastic_protobufs::meshtastic::ChannelSet;
 use prost::Message;
 
 use crate::errors::EncodeError;
-use crate::models::{MeshtasticConfig, MESHTASTIC_CHANNEL_URL_BASE};
+use crate::models::{MESHTASTIC_CHANNEL_URL_BASE, MeshtasticConfig};
 
 /// Encodes a MeshtasticConfig into a full URL.
 ///
@@ -107,7 +107,7 @@ fn encode_base64(data: &[u8]) -> Result<String, EncodeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{ChannelInfo, ChannelRole, LoRaInfo, PskType, DEFAULT_PSK};
+    use crate::models::{ChannelInfo, ChannelRole, DEFAULT_PSK, LoRaInfo, PskType};
     use meshtastic_protobufs::meshtastic::config::lo_ra_config::{ModemPreset, RegionCode};
 
     #[test]

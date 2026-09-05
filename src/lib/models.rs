@@ -1,6 +1,6 @@
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use meshtastic_protobufs::meshtastic::config::{
-    lo_ra_config::ModemPreset, lo_ra_config::RegionCode, LoRaConfig,
+    LoRaConfig, lo_ra_config::ModemPreset, lo_ra_config::RegionCode,
 };
 use meshtastic_protobufs::meshtastic::{ChannelSettings, ModuleSettings};
 
@@ -1041,7 +1041,7 @@ mod tests {
 
     #[test]
     fn test_node_info_from_url() {
-        use crate::decoder::{decode_url, DecodeResult};
+        use crate::decoder::{DecodeResult, decode_url};
 
         let url = "#CAESJQoLIXRlc3QwMDAwMDESEEdhbGljaWEgQ2FsaWRhZGUaBPCfkJk";
         let result = decode_url(url).expect("valid URL");

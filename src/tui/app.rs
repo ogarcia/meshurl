@@ -2,13 +2,13 @@ use meshurl::models::MeshtasticConfig;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::crossterm::{
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{backend::CrosstermBackend, widgets::ListState, Frame, Terminal};
+use ratatui::{Frame, Terminal, backend::CrosstermBackend, widgets::ListState};
 use ratatui_textarea::TextArea;
 use std::io;
 
-pub use crate::tui::widgets::{render_toast, ToastMessage};
+pub use crate::tui::widgets::{ToastMessage, render_toast};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum AppMode {

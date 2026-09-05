@@ -1,13 +1,13 @@
 //! Meshtastic URL decoder module.
 //! Provides functions to decode Meshtastic channel configuration URLs and node info URLs.
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use meshtastic_protobufs::meshtastic::{ChannelSet, NodeInfo as PbNodeInfo};
 use prost::Message;
 
 use crate::errors::DecodeError;
 use crate::models::{
-    MeshtasticConfig, NodeInfo, MESHTASTIC_CHANNEL_URL_BASE, MESHTASTIC_NODE_URL_BASE,
+    MESHTASTIC_CHANNEL_URL_BASE, MESHTASTIC_NODE_URL_BASE, MeshtasticConfig, NodeInfo,
 };
 
 /// Result of decoding a Meshtastic URL.

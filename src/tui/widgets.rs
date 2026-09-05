@@ -1,11 +1,11 @@
 use meshurl::models::{
-    ChannelInfo, ChannelRole, LoRaInfo, MeshtasticDisplay, PskType, POSITION_OPTIONS,
+    ChannelInfo, ChannelRole, LoRaInfo, MeshtasticDisplay, POSITION_OPTIONS, PskType,
 };
 use ratatui::{
+    Frame,
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, ListItem, Padding, Paragraph},
-    Frame,
 };
 
 #[derive(Clone)]
@@ -38,11 +38,7 @@ pub fn render_toast(f: &mut Frame, toast: &ToastMessage) {
 }
 
 pub fn yes_no(value: bool) -> &'static str {
-    if value {
-        "Yes"
-    } else {
-        "No"
-    }
+    if value { "Yes" } else { "No" }
 }
 
 pub fn channel_total_lines(channels: &[ChannelInfo]) -> usize {
@@ -283,11 +279,7 @@ pub fn channel_list_item(index: usize, channel: &ChannelInfo) -> ListItem<'_> {
     };
 
     let name_val = if channel.name.is_empty() {
-        if index == 0 {
-            "(primary channel)"
-        } else {
-            ""
-        }
+        if index == 0 { "(primary channel)" } else { "" }
     } else {
         &channel.name
     };

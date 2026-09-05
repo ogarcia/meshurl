@@ -1,10 +1,10 @@
-use meshurl::decoder::{decode_url, DecodeResult};
+use meshurl::decoder::{DecodeResult, decode_url};
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Style},
     text::Line,
     widgets::{Block, BorderType, Borders, List, ListItem, ListState, Padding, Paragraph},
-    Frame,
 };
 use ratatui_textarea::TextArea;
 

@@ -1,15 +1,15 @@
 use base64::Engine;
 use meshurl::encoder::{encode_url, modem_preset_from_str, region_code_from_str};
 use meshurl::models::{
-    generate_random_psk, get_preset_params, hash_phrase_to_psk, ChannelInfo, ChannelRole, LoRaInfo,
-    MeshtasticDisplay, PskMode, PskType, DEFAULT_PSK, POSITION_OPTIONS,
+    ChannelInfo, ChannelRole, DEFAULT_PSK, LoRaInfo, MeshtasticDisplay, POSITION_OPTIONS, PskMode,
+    PskType, generate_random_psk, get_preset_params, hash_phrase_to_psk,
 };
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Paragraph},
-    Frame,
 };
 use ratatui_textarea::{CursorMove, TextArea};
 use std::io::Write;
@@ -487,10 +487,22 @@ pub fn draw_encode_mode(f: &mut Frame, state: &mut EncodeDrawState) {
     let can_reorder = state.encode_config.channels.len() >= 2;
     let reorder_hint = if can_reorder { " [+]/[-] Move" } else { "" };
     let footer_text = match state.active_panel {
-        ActivePanel::Channels => format!("[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [D] Delete{}  [E] LoRa  [G] Generate{}  [Del] Clear", reorder_hint, copy_hint),
-        ActivePanel::Lora => format!("[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [E] LoRa  [G] Generate{}  [Del] Clear", copy_hint),
-        ActivePanel::UrlEncode => format!("[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [E] LoRa  [G] Generate{}  [Del] Clear", copy_hint),
-        ActivePanel::Url => format!("[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [E] LoRa  [G] Generate{}  [Del] Clear", copy_hint),
+        ActivePanel::Channels => format!(
+            "[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [D] Delete{}  [E] LoRa  [G] Generate{}  [Del] Clear",
+            reorder_hint, copy_hint
+        ),
+        ActivePanel::Lora => format!(
+            "[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [E] LoRa  [G] Generate{}  [Del] Clear",
+            copy_hint
+        ),
+        ActivePanel::UrlEncode => format!(
+            "[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [E] LoRa  [G] Generate{}  [Del] Clear",
+            copy_hint
+        ),
+        ActivePanel::Url => format!(
+            "[1] Decode  [2] Encode  [Tab/Shift+Tab] Switch  [A] Add  [E] LoRa  [G] Generate{}  [Del] Clear",
+            copy_hint
+        ),
     };
     let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::DarkGray));
     f.render_widget(footer, chunks[4]);
