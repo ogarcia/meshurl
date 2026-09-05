@@ -72,6 +72,61 @@ fn toast_area(area: Rect, text: &str) -> Option<Rect> {
     Some(Rect::new(x, y, width, height))
 }
 
+/// Margin kept around a centered popup when the screen is big enough.
+const POPUP_MARGIN: u16 = 4;
+
+/// Centers a popup of at most `width` x `height` inside `area`.
+///
+/// The requested size is clamped to what the screen can actually hold, so a
+/// small terminal shrinks the popup instead of overflowing the buffer.
+/// Returns `None` when there is nothing to draw into.
+pub fn centered_popup(area: Rect, width: u16, height: u16) -> Option<Rect> {
+    if area.width == 0 || area.height == 0 {
+        return None;
+    }
+
+    let width = width.min(area.width.saturating_sub(POPUP_MARGIN).max(1));
+    let height = height.min(area.height.saturating_sub(POPUP_MARGIN).max(1));
+
+    let x = area.x + (area.width - width) / 2;
+    let y = area.y + (area.height - height) / 2;
+
+    Some(Rect::new(x, y, width, height))
+}
+
+/// Width of `text` in terminal columns.
+pub fn text_width(text: &str) -> usize {
+    Line::from(text).width()
+}
+
+/// Shortens `text` to `max_columns` terminal columns, marking the cut with an
+/// ellipsis.
+///
+/// Slicing by byte offset panics whenever the cut lands inside a multi-byte
+/// character, which channel names routinely contain.
+pub fn truncate_to_columns(text: &str, max_columns: usize) -> String {
+    if text_width(text) <= max_columns {
+        return text.to_string();
+    }
+
+    // Reserve one column for the ellipsis itself.
+    let budget = max_columns.saturating_sub(1);
+    let mut truncated = String::new();
+    let mut used = 0;
+
+    for character in text.chars() {
+        let width = text_width(character.encode_utf8(&mut [0; 4]));
+        if used + width > budget {
+            break;
+        }
+        truncated.push(character);
+        used += width;
+    }
+
+    truncated.push('…');
+    truncated
+}
+
 pub fn yes_no(value: bool) -> &'static str {
     if value { "Yes" } else { "No" }
 }
@@ -481,6 +536,65 @@ mod tests {
     fn area_is_none_when_there_is_no_room() {
         assert!(toast_area(Rect::new(0, 0, 1, 10), "x").is_none());
         assert!(toast_area(Rect::new(0, 0, 20, 0), "x").is_none());
+    }
+
+    #[test]
+    fn popup_is_centered_and_leaves_a_margin() {
+        let screen = Rect::new(0, 0, 80, 24);
+        let popup = centered_popup(screen, 40, 10).expect("fits");
+
+        assert_eq!(popup.width, 40);
+        assert_eq!(popup.height, 10);
+        assert_eq!(popup.x, 20);
+        assert_eq!(popup.y, 7);
+    }
+
+    #[test]
+    fn popup_shrinks_to_fit_a_small_screen() {
+        let screen = Rect::new(0, 0, 10, 6);
+        let popup = centered_popup(screen, 40, 18).expect("fits after clamping");
+
+        assert!(popup.right() <= screen.right());
+        assert!(popup.bottom() <= screen.bottom());
+    }
+
+    #[test]
+    fn popup_survives_a_screen_smaller_than_the_margin() {
+        let screen = Rect::new(0, 0, 2, 2);
+        let popup = centered_popup(screen, 40, 18).expect("still yields a rect");
+
+        assert!(popup.right() <= screen.right());
+        assert!(popup.bottom() <= screen.bottom());
+    }
+
+    #[test]
+    fn popup_is_none_on_an_empty_screen() {
+        assert!(centered_popup(Rect::new(0, 0, 0, 10), 10, 3).is_none());
+        assert!(centered_popup(Rect::new(0, 0, 10, 0), 10, 3).is_none());
+    }
+
+    #[test]
+    fn truncation_leaves_short_text_alone() {
+        assert_eq!(truncate_to_columns("short", 22), "short");
+        assert_eq!(truncate_to_columns("", 22), "");
+    }
+
+    #[test]
+    fn truncation_marks_the_cut() {
+        let truncated = truncate_to_columns("0123456789", 5);
+
+        assert_eq!(truncated, "0123\u{2026}");
+        assert_eq!(text_width(&truncated), 5);
+    }
+
+    #[test]
+    fn truncation_does_not_split_multi_byte_characters() {
+        // Byte slicing at column 22 lands inside the last octopus and panics.
+        let name = "Channel for tests \u{1f419}\u{1f419}\u{1f419}";
+        let truncated = truncate_to_columns(name, 22);
+
+        assert!(text_width(&truncated) <= 22);
+        assert!(truncated.ends_with('\u{2026}'));
     }
 
     #[test]

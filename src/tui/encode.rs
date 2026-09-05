@@ -17,9 +17,19 @@ use std::process::Command;
 
 use crate::tui::app::{ActivePanel, EncodeDrawState, EncodeState};
 use crate::tui::widgets::{
-    channel_list_item, channel_scroll_indicator, channel_total_lines, lora_info_lines,
-    lora_scroll_info,
+    centered_popup, channel_list_item, channel_scroll_indicator, channel_total_lines,
+    lora_info_lines, lora_scroll_info, truncate_to_columns,
 };
+
+/// Preferred width of the channel editing popup.
+const CHANNEL_POPUP_WIDTH: u16 = 35;
+/// Preferred width of the LoRa editing popup.
+const LORA_POPUP_WIDTH: u16 = 40;
+/// Preferred size of the single-line input overlays.
+const INPUT_OVERLAY_WIDTH: u16 = 40;
+const INPUT_OVERLAY_HEIGHT: u16 = 3;
+/// Columns a popup field value may occupy before it is shortened.
+const POPUP_VALUE_COLUMNS: usize = 22;
 
 pub struct ChannelPopupState {
     pub channel_index: Option<usize>,
@@ -844,13 +854,12 @@ pub fn handle_encode_tab(
 
 pub fn draw_channel_popup(f: &mut Frame, state: &ChannelPopupState) {
     let area = f.area();
-    let width = 35.min(area.width - 4);
     let popup_fields = get_popup_fields(&state.psk_mode);
-    let height = (popup_fields.len() as u16 + 2).min(area.height - 4);
-    let x = (area.width - width) / 2;
-    let y = (area.height - height) / 2;
-
-    let popup_rect = ratatui::layout::Rect::new(x, y, width, height);
+    let height = popup_fields.len() as u16 + 2;
+    let popup_rect = match centered_popup(area, CHANNEL_POPUP_WIDTH, height) {
+        Some(rect) => rect,
+        None => return,
+    };
 
     f.render_widget(Clear, popup_rect);
 
@@ -878,27 +887,9 @@ pub fn draw_channel_popup(f: &mut Frame, state: &ChannelPopupState) {
         let is_selected = i == state.selected_field;
 
         let value = match *field {
-            "Name" => {
-                if state.name.is_empty() {
-                    String::new()
-                } else {
-                    let max_len = 22;
-                    if state.name.len() > max_len {
-                        format!("{}…", &state.name[..max_len])
-                    } else {
-                        state.name.clone()
-                    }
-                }
-            }
+            "Name" => truncate_to_columns(&state.name, POPUP_VALUE_COLUMNS),
             "PSK Mode" => state.psk_mode.to_string(),
-            "PSK" => {
-                let max_len = 22;
-                if state.psk_value.len() > max_len {
-                    format!("{}…", &state.psk_value[..max_len])
-                } else {
-                    state.psk_value.clone()
-                }
-            }
+            "PSK" => truncate_to_columns(&state.psk_value, POPUP_VALUE_COLUMNS),
             "Uplink" => if state.uplink_enabled { "✓" } else { "✗" }.to_string(),
             "Downlink" => if state.downlink_enabled { "✓" } else { "✗" }.to_string(),
             "Position" => POSITION_OPTIONS[state.position_index].0.to_string(),
@@ -928,15 +919,9 @@ pub fn draw_channel_popup(f: &mut Frame, state: &ChannelPopupState) {
         );
     }
 
-    if state.editing_name {
-        let overlay_width = 40.min(area.width - 4);
-        let overlay_height = 3;
-        let overlay_x = (area.width - overlay_width) / 2;
-        let overlay_y = (area.height - overlay_height) / 2;
-
-        let overlay_rect =
-            ratatui::layout::Rect::new(overlay_x, overlay_y, overlay_width, overlay_height);
-
+    if state.editing_name
+        && let Some(overlay_rect) = centered_popup(area, INPUT_OVERLAY_WIDTH, INPUT_OVERLAY_HEIGHT)
+    {
         f.render_widget(Clear, overlay_rect);
 
         let bg_block = Block::default()
@@ -957,15 +942,9 @@ pub fn draw_channel_popup(f: &mut Frame, state: &ChannelPopupState) {
         f.render_widget(&textarea, input_rect);
     }
 
-    if state.editing_psk {
-        let overlay_width = 40.min(area.width - 4);
-        let overlay_height = 3;
-        let overlay_x = (area.width - overlay_width) / 2;
-        let overlay_y = (area.height - overlay_height) / 2;
-
-        let overlay_rect =
-            ratatui::layout::Rect::new(overlay_x, overlay_y, overlay_width, overlay_height);
-
+    if state.editing_psk
+        && let Some(overlay_rect) = centered_popup(area, INPUT_OVERLAY_WIDTH, INPUT_OVERLAY_HEIGHT)
+    {
         f.render_widget(Clear, overlay_rect);
 
         let psk_title = match state.psk_mode {
@@ -994,13 +973,11 @@ pub fn draw_channel_popup(f: &mut Frame, state: &ChannelPopupState) {
 }
 
 pub fn draw_lora_popup(f: &mut Frame, state: &LoRaPopupState, area: ratatui::layout::Rect) {
-    let width = 40.min(area.width - 4);
     let height = (LORA_FIELDS.len() + 2) as u16;
-    let height = height.min(area.height - 4);
-    let x = (area.width - width) / 2;
-    let y = (area.height - height) / 2;
-
-    let popup_rect = ratatui::layout::Rect::new(x, y, width, height);
+    let popup_rect = match centered_popup(area, LORA_POPUP_WIDTH, height) {
+        Some(rect) => rect,
+        None => return,
+    };
 
     f.render_widget(Clear, popup_rect);
 
@@ -1471,6 +1448,7 @@ mod tests {
     use crate::tui::app::ActivePanel;
     use meshurl::models::MeshtasticConfig;
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    use ratatui::{Terminal, backend::TestBackend};
 
     /// Feeds a key to the encode handler with the channel panel focused.
     fn press(config: &mut MeshtasticConfig, list_state: &mut ListState, code: KeyCode) {
@@ -1508,6 +1486,41 @@ mod tests {
         }
         reindex_channels(&mut config.channels);
         config
+    }
+
+    fn draw_popup(width: u16, height: u16, popup: &ChannelPopupState) {
+        let mut terminal =
+            Terminal::new(TestBackend::new(width, height)).expect("test backend starts");
+        terminal
+            .draw(|f| draw_channel_popup(f, popup))
+            .expect("popup renders");
+    }
+
+    #[test]
+    fn channel_popup_renders_a_multi_byte_name() {
+        let mut popup = ChannelPopupState::new();
+        // Byte slicing at column 22 lands inside the last octopus and panics.
+        popup.name = "Channel for tests \u{1f419}\u{1f419}\u{1f419}".to_string();
+
+        draw_popup(80, 30, &popup);
+    }
+
+    #[test]
+    fn channel_popup_renders_on_a_tiny_screen() {
+        let popup = ChannelPopupState::new();
+
+        draw_popup(3, 3, &popup);
+        draw_popup(1, 1, &popup);
+    }
+
+    #[test]
+    fn lora_popup_renders_on_a_tiny_screen() {
+        let popup = LoRaPopupState::new();
+        let mut terminal = Terminal::new(TestBackend::new(3, 3)).expect("test backend starts");
+
+        terminal
+            .draw(|f| draw_lora_popup(f, &popup, f.area()))
+            .expect("popup renders");
     }
 
     #[test]
