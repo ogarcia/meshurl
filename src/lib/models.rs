@@ -260,22 +260,18 @@ fn hardware_model_to_string(model: i32) -> String {
     format!("Unknown ({})", model)
 }
 
-/// Generates a random 32-byte PSK encoded in base64.
-/// Uses a simple linear congruential generator seeded with current time.
-pub fn generate_random_psk() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos() as u64;
+/// Generates a random 32-byte AES-256 PSK encoded in base64.
+///
+/// The bytes come from the operating system CSPRNG. An earlier version used a
+/// linear congruential generator seeded with the clock, which offered only as
+/// much entropy as the instant it ran at rather than the 256 bits it claimed.
+///
+/// # Errors
+/// Returns an error if the operating system cannot supply random bytes.
+pub fn generate_random_psk() -> Result<String, String> {
     let mut bytes = [0u8; 32];
-    let mut rng = seed;
-    for byte in bytes.iter_mut() {
-        rng = rng.wrapping_mul(1103515245).wrapping_add(12345);
-        *byte = (rng >> 16) as u8;
-    }
-    STANDARD.encode(bytes)
+    getrandom::fill(&mut bytes).map_err(|e| format!("Cannot generate a random PSK: {}", e))?;
+    Ok(STANDARD.encode(bytes))
 }
 
 /// Converts a text phrase to a 32-byte PSK using SHA256 hashing.
@@ -469,7 +465,7 @@ impl std::str::FromStr for ChannelInfo {
                 match psk_mode.unwrap_or(PskMode::Default) {
                     PskMode::Default => DEFAULT_PSK.to_string(),
                     PskMode::None => String::new(),
-                    PskMode::Random => generate_random_psk(),
+                    PskMode::Random => generate_random_psk()?,
                     PskMode::Base64(psk_str) => validate_and_normalize_psk(&psk_str)?,
                     PskMode::Passphrase(phrase) => hash_passphrase(&phrase)?,
                 }
@@ -898,8 +894,8 @@ mod tests {
 
     #[test]
     fn test_generate_random_psk() {
-        let psk1 = generate_random_psk();
-        let psk2 = generate_random_psk();
+        let psk1 = generate_random_psk().unwrap();
+        let psk2 = generate_random_psk().unwrap();
 
         assert!(!psk1.is_empty());
         assert!(!psk2.is_empty());
@@ -907,6 +903,48 @@ mod tests {
 
         let decoded = STANDARD.decode(&psk1).unwrap();
         assert_eq!(decoded.len(), 32);
+    }
+
+    /// A key seeded from the clock cannot be told apart from a real one by
+    /// looking at its bytes; what gives it away is that it can be rebuilt. This
+    /// replays the old generator over every seed the call could have used.
+    #[test]
+    fn test_generate_random_psk_is_not_derived_from_the_clock() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        fn clock_now() -> u64 {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock is after the epoch")
+                .as_nanos() as u64
+        }
+
+        /// The generator this crate used to ship.
+        fn key_from_seed(seed: u64) -> [u8; 32] {
+            let mut bytes = [0u8; 32];
+            let mut rng = seed;
+            for byte in bytes.iter_mut() {
+                rng = rng.wrapping_mul(1103515245).wrapping_add(12345);
+                *byte = (rng >> 16) as u8;
+            }
+            bytes
+        }
+
+        // Bracket the call so the seed it would have used is in [before, after].
+        let before = clock_now();
+        let psk = generate_random_psk().unwrap();
+        let after = clock_now();
+
+        let key = STANDARD.decode(&psk).unwrap();
+        // Cap the search so a stalled machine cannot make this test crawl.
+        let last = after.min(before + 500_000);
+        for seed in before..=last {
+            assert_ne!(
+                key_from_seed(seed).as_slice(),
+                key.as_slice(),
+                "the PSK can be rebuilt from the clock"
+            );
+        }
     }
 
     #[test]

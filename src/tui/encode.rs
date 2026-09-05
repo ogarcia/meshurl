@@ -328,7 +328,7 @@ impl ChannelPopupState {
         match self.psk_mode {
             PskModeKind::Default => Ok((DEFAULT_PSK.to_string(), PskType::Default)),
             PskModeKind::None => Ok((String::new(), PskType::None)),
-            PskModeKind::Random => Ok((generate_random_psk(), PskType::Aes256)),
+            PskModeKind::Random => Ok((generate_random_psk()?, PskType::Aes256)),
             PskModeKind::Base64 => {
                 let psk = self.psk_value.trim();
                 if psk.is_empty() {

@@ -827,6 +827,7 @@ dependencies = [
  "clap",
  "colored",
  "crossterm",
+ "getrandom 0.4.3",
  "meshtastic_protobufs",
  "prost",
  "ratatui",
