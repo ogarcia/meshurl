@@ -626,26 +626,86 @@ impl PskType {
     }
 }
 
+/// How a configuration chooses its radio parameters.
+///
+/// A `LoRaConfig` that is not using a preset leaves `modem_preset` unset, and
+/// proto3 reports an unset enum as its first variant, which is `LongFast`. Any
+/// type that stores the preset unconditionally therefore has a `LongFast` in it
+/// that means "no preset", and every consumer has to remember not to show it.
+/// Modelling the two cases as separate variants removes that trap.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ModemConfig {
+    /// Radio parameters come from a named preset.
+    Preset(ModemPreset),
+    /// Radio parameters were set by hand.
+    Custom {
+        /// Bandwidth in kHz.
+        bandwidth: u32,
+        /// Spreading factor.
+        spread_factor: u32,
+        /// Coding rate denominator, as in 4/`coding_rate`.
+        coding_rate: u32,
+    },
+}
+
+impl ModemConfig {
+    /// The preset in use, or `None` when the parameters are manual.
+    pub fn preset(&self) -> Option<ModemPreset> {
+        match self {
+            ModemConfig::Preset(preset) => Some(*preset),
+            ModemConfig::Custom { .. } => None,
+        }
+    }
+
+    /// Whether the parameters come from a preset.
+    pub fn uses_preset(&self) -> bool {
+        matches!(self, ModemConfig::Preset(_))
+    }
+
+    /// The radio parameters, resolving a preset to its values.
+    ///
+    /// Returns (bandwidth in kHz, spreading factor, coding rate denominator).
+    pub fn parameters(&self) -> (u32, u32, u32) {
+        match self {
+            ModemConfig::Preset(preset) => get_preset_params(*preset),
+            ModemConfig::Custom {
+                bandwidth,
+                spread_factor,
+                coding_rate,
+            } => (*bandwidth, *spread_factor, *coding_rate),
+        }
+    }
+
+    /// The name to show for this configuration.
+    pub fn name(&self) -> &'static str {
+        match self {
+            ModemConfig::Preset(preset) => preset.to_mesh_string(),
+            ModemConfig::Custom { .. } => CUSTOM_MODEM_NAME,
+        }
+    }
+}
+
+impl Default for ModemConfig {
+    fn default() -> Self {
+        ModemConfig::Preset(ModemPreset::LongFast)
+    }
+}
+
+/// Shown in place of a preset name when the parameters are manual.
+pub const CUSTOM_MODEM_NAME: &str = "Custom";
+
 /// LoRa radio configuration for Meshtastic.
 /// Contains all configurable parameters for the LoRa modem.
 #[derive(Debug, Clone, Default)]
 pub struct LoRaInfo {
     /// Region code (e.g., EU868, US, CN, etc.)
     pub region: RegionCode,
-    /// Modem preset (LongFast, MediumSlow, etc.)
-    pub modem_preset: ModemPreset,
-    /// Whether to use the preset values instead of manual configuration
-    pub use_preset: bool,
+    /// How the radio parameters are chosen: a named preset or manual values
+    pub modem: ModemConfig,
     /// Whether TX is enabled
     pub tx_enabled: bool,
     /// TX power in dBm (0 = use default maximum safe power)
     pub tx_power: i32,
-    /// Bandwidth in Hz (only used if use_preset is false)
-    pub bandwidth: u32,
-    /// Spreading factor (only used if use_preset is false)
-    pub spread_factor: u32,
-    /// Coding rate (only used if use_preset is false)
-    pub coding_rate: u32,
     /// Maximum number of hops for packets
     pub hop_limit: u32,
     /// Channel number (0 = auto)
@@ -751,28 +811,24 @@ impl From<&ChannelSettings> for ChannelInfo {
 /// numeric field as zero.
 impl From<&LoRaConfig> for LoRaInfo {
     fn from(config: &LoRaConfig) -> Self {
-        let modem_preset = config.modem_preset();
-
         // `bandwidth` is already in kHz, matching get_preset_params. Dividing it
         // by 1000 first, as this used to, compared kHz against zero and made the
         // outcome depend on values no device sends.
-        let use_preset = config.use_preset || config.bandwidth == 0;
-
-        let (bandwidth, spread_factor, coding_rate) = if use_preset {
-            get_preset_params(modem_preset)
+        let modem = if config.use_preset || config.bandwidth == 0 {
+            ModemConfig::Preset(config.modem_preset())
         } else {
-            (config.bandwidth, config.spread_factor, config.coding_rate)
+            ModemConfig::Custom {
+                bandwidth: config.bandwidth,
+                spread_factor: config.spread_factor,
+                coding_rate: config.coding_rate,
+            }
         };
 
         LoRaInfo {
             region: config.region(),
-            modem_preset,
-            use_preset,
+            modem,
             tx_enabled: config.tx_enabled,
             tx_power: config.tx_power,
-            bandwidth,
-            spread_factor,
-            coding_rate,
             hop_limit: config.hop_limit,
             channel_num: config.channel_num,
             override_duty_cycle: config.override_duty_cycle,
@@ -870,15 +926,19 @@ impl From<&ChannelInfo> for ChannelSettings {
 /// This is used when encoding a URL to create the binary config.
 impl From<&LoRaInfo> for LoRaConfig {
     fn from(info: &LoRaInfo) -> Self {
+        let (bandwidth, spread_factor, coding_rate) = info.modem.parameters();
+
         LoRaConfig {
             region: info.region as i32,
-            modem_preset: info.modem_preset as i32,
-            use_preset: info.use_preset,
+            // A manual configuration has no preset to name, so it keeps the
+            // protobuf default; use_preset is what tells the two apart.
+            modem_preset: info.modem.preset().unwrap_or_default() as i32,
+            use_preset: info.modem.uses_preset(),
             tx_enabled: info.tx_enabled,
             tx_power: info.tx_power,
-            bandwidth: info.bandwidth,
-            spread_factor: info.spread_factor,
-            coding_rate: info.coding_rate,
+            bandwidth,
+            spread_factor,
+            coding_rate,
             hop_limit: info.hop_limit,
             channel_num: info.channel_num,
             override_duty_cycle: info.override_duty_cycle,
@@ -1117,11 +1177,8 @@ mod tests {
         // With a preset in use the firmware leaves the parameters unset.
         let info = LoRaInfo::from(&lora_config(true, 0, 0, 0));
 
-        assert!(info.use_preset);
-        assert_eq!(
-            (info.bandwidth, info.spread_factor, info.coding_rate),
-            (250, 11, 5)
-        );
+        assert_eq!(info.modem, ModemConfig::Preset(ModemPreset::LongFast));
+        assert_eq!(info.modem.parameters(), (250, 11, 5));
     }
 
     #[test]
@@ -1129,11 +1186,8 @@ mod tests {
         // Values taken from a real URL: 62 kHz, SF7, CR 4/6.
         let info = LoRaInfo::from(&lora_config(false, 62, 7, 6));
 
-        assert!(!info.use_preset);
-        assert_eq!(
-            (info.bandwidth, info.spread_factor, info.coding_rate),
-            (62, 7, 6)
-        );
+        assert!(!info.modem.uses_preset());
+        assert_eq!(info.modem.parameters(), (62, 7, 6));
     }
 
     #[test]
@@ -1142,11 +1196,8 @@ mod tests {
         // preset and that is what it means. Second-guessing it rewrote the flag.
         let info = LoRaInfo::from(&lora_config(false, 250, 11, 5));
 
-        assert!(!info.use_preset);
-        assert_eq!(
-            (info.bandwidth, info.spread_factor, info.coding_rate),
-            (250, 11, 5)
-        );
+        assert!(!info.modem.uses_preset());
+        assert_eq!(info.modem.parameters(), (250, 11, 5));
     }
 
     #[test]
@@ -1154,7 +1205,38 @@ mod tests {
         // 250 is 250 kHz, not 250 Hz: dividing by 1000 first zeroed it out.
         let info = LoRaInfo::from(&lora_config(false, 250, 11, 5));
 
-        assert_eq!(info.bandwidth, 250);
+        assert_eq!(info.modem.parameters().0, 250);
+    }
+
+    #[test]
+    fn test_manual_config_has_no_preset_name() {
+        // The protobuf default reads as LongFast; showing it as the preset in
+        // use is reporting an absent field as a choice.
+        let info = LoRaInfo::from(&lora_config(false, 62, 7, 6));
+
+        assert_eq!(info.modem.preset(), None);
+        assert_eq!(info.modem.name(), CUSTOM_MODEM_NAME);
+    }
+
+    #[test]
+    fn test_manual_config_survives_a_protobuf_round_trip() {
+        let info = LoRaInfo::from(&lora_config(false, 62, 7, 6));
+
+        let encoded = LoRaConfig::from(&info);
+        let decoded = LoRaInfo::from(&encoded);
+
+        assert!(!encoded.use_preset);
+        assert_eq!(decoded.modem, info.modem);
+        assert_eq!(decoded.modem.parameters(), (62, 7, 6));
+    }
+
+    #[test]
+    fn test_preset_config_survives_a_protobuf_round_trip() {
+        let info = LoRaInfo::from(&lora_config(true, 0, 0, 0));
+
+        let decoded = LoRaInfo::from(&LoRaConfig::from(&info));
+
+        assert_eq!(decoded.modem, ModemConfig::Preset(ModemPreset::LongFast));
     }
 
     #[test]

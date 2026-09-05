@@ -1,9 +1,9 @@
 use base64::Engine;
 use meshurl::encoder::{ModemPreset, RegionCode, encode_url};
 use meshurl::models::{
-    ChannelInfo, ChannelRole, DEFAULT_PSK, LoRaInfo, MODEM_PRESETS, MeshtasticDisplay,
-    POSITION_OPTIONS, PskType, REGION_CODES, generate_random_psk, get_preset_params,
-    hash_phrase_to_psk, validate_channel_name,
+    CUSTOM_MODEM_NAME, ChannelInfo, ChannelRole, DEFAULT_PSK, LoRaInfo, MODEM_PRESETS,
+    MeshtasticDisplay, ModemConfig, POSITION_OPTIONS, PskType, REGION_CODES, generate_random_psk,
+    get_preset_params, hash_phrase_to_psk, validate_channel_name,
 };
 use ratatui::{
     Frame,
@@ -106,14 +106,49 @@ pub struct ChannelPopupState {
     pub psk_textarea: TextArea<'static>,
 }
 
+/// What the "Modem" field of the LoRa popup is showing.
+///
+/// The field cycles through every preset and then a manual entry, so choosing
+/// manual parameters is the same gesture as choosing a preset. This replaces
+/// the separate "Use Preset" toggle, which wrote the preset values either way
+/// and so did nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModemChoice {
+    Preset(ModemPreset),
+    Custom,
+}
+
+impl ModemChoice {
+    /// Every entry the field offers, presets first.
+    fn all() -> Vec<ModemChoice> {
+        MODEM_PRESETS
+            .iter()
+            .map(|preset| ModemChoice::Preset(*preset))
+            .chain(std::iter::once(ModemChoice::Custom))
+            .collect()
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            ModemChoice::Preset(preset) => preset.to_mesh_string(),
+            ModemChoice::Custom => CUSTOM_MODEM_NAME,
+        }
+    }
+}
+
 pub struct LoRaPopupState {
     pub region: RegionCode,
-    pub modem_preset: ModemPreset,
+    /// The modem entry being shown: a preset, or the manual option.
+    pub modem_choice: ModemChoice,
+    /// Manual radio parameters, kept even while a preset is selected so that
+    /// cycling past the manual entry does not discard them.
+    pub bandwidth: u32,
+    pub spread_factor: u32,
+    pub coding_rate: u32,
     pub tx_power: i32,
     pub hop_limit: u32,
     pub channel_num: u32,
     pub tx_enabled: bool,
-    pub use_preset: bool,
     pub override_frequency: f32,
     pub frequency_offset: f32,
     pub sx126x_rx_boosted_gain: bool,
@@ -126,14 +161,17 @@ pub struct LoRaPopupState {
 
 impl LoRaPopupState {
     pub fn new() -> Self {
+        let (bandwidth, spread_factor, coding_rate) = get_preset_params(ModemPreset::LongFast);
         Self {
             region: RegionCode::Eu868,
-            modem_preset: ModemPreset::LongFast,
+            modem_choice: ModemChoice::Preset(ModemPreset::LongFast),
+            bandwidth,
+            spread_factor,
+            coding_rate,
             tx_power: 0,
             hop_limit: 3,
             channel_num: 0,
             tx_enabled: true,
-            use_preset: true,
             override_frequency: 0.0,
             frequency_offset: 0.0,
             sx126x_rx_boosted_gain: false,
@@ -147,14 +185,23 @@ impl LoRaPopupState {
     }
 
     pub fn from_lora(lora: &LoRaInfo) -> Self {
+        // Carry the parameters over whichever mode is in use: dropping them
+        // here is what silently turned a manual configuration into LongFast.
+        let (bandwidth, spread_factor, coding_rate) = lora.modem.parameters();
+
         Self {
             region: lora.region,
-            modem_preset: lora.modem_preset,
+            modem_choice: match lora.modem.preset() {
+                Some(preset) => ModemChoice::Preset(preset),
+                None => ModemChoice::Custom,
+            },
+            bandwidth,
+            spread_factor,
+            coding_rate,
             tx_power: lora.tx_power,
             hop_limit: lora.hop_limit,
             channel_num: lora.channel_num,
             tx_enabled: lora.tx_enabled,
-            use_preset: lora.use_preset,
             override_frequency: lora.override_frequency,
             frequency_offset: lora.frequency_offset,
             sx126x_rx_boosted_gain: lora.sx126x_rx_boosted_gain,
@@ -167,17 +214,20 @@ impl LoRaPopupState {
     }
 
     pub fn to_lora_info(&self) -> LoRaInfo {
-        let (bandwidth, spread_factor, coding_rate) = get_preset_params(self.modem_preset);
+        let modem = match self.modem_choice {
+            ModemChoice::Preset(preset) => ModemConfig::Preset(preset),
+            ModemChoice::Custom => ModemConfig::Custom {
+                bandwidth: self.bandwidth,
+                spread_factor: self.spread_factor,
+                coding_rate: self.coding_rate,
+            },
+        };
 
         LoRaInfo {
             region: self.region,
-            modem_preset: self.modem_preset,
-            use_preset: self.use_preset,
+            modem,
             tx_enabled: self.tx_enabled,
             tx_power: self.tx_power,
-            bandwidth,
-            spread_factor,
-            coding_rate,
             hop_limit: self.hop_limit,
             channel_num: self.channel_num,
             override_duty_cycle: self.override_duty_cycle,
@@ -192,14 +242,14 @@ impl LoRaPopupState {
     }
 }
 
+/// Fields shown for every configuration.
 const LORA_FIELDS: &[&str] = &[
     "Region",
-    "Modem Preset",
+    "Modem",
     "TX Power",
     "Hop Limit",
     "Channel",
     "TX Enabled",
-    "Use Preset",
     "Override Freq",
     "Freq Offset",
     "SX126x RX",
@@ -210,6 +260,26 @@ const LORA_FIELDS: &[&str] = &[
     "Save",
     "Cancel",
 ];
+
+/// Extra fields shown only for a manual modem configuration, inserted right
+/// after "Modem".
+const LORA_CUSTOM_FIELDS: &[&str] = &["Bandwidth", "Spread Factor", "Coding Rate"];
+
+/// The fields the popup is currently showing.
+fn lora_fields(modem_choice: ModemChoice) -> Vec<&'static str> {
+    if modem_choice != ModemChoice::Custom {
+        return LORA_FIELDS.to_vec();
+    }
+
+    let mut fields = Vec::with_capacity(LORA_FIELDS.len() + LORA_CUSTOM_FIELDS.len());
+    for field in LORA_FIELDS {
+        fields.push(*field);
+        if *field == "Modem" {
+            fields.extend_from_slice(LORA_CUSTOM_FIELDS);
+        }
+    }
+    fields
+}
 
 impl ChannelPopupState {
     pub fn new() -> Self {
@@ -344,6 +414,20 @@ impl ChannelPopupState {
                 is_client_muted: self.muted,
             },
         ))
+    }
+}
+
+/// Bandwidths the LoRa radios support, in kHz.
+const LORA_BANDWIDTHS: &[u32] = &[31, 62, 125, 250, 500];
+
+/// Moves `value` one step within `min..=max`, wrapping at both ends.
+fn step_in_range(value: u32, direction: isize, min: u32, max: u32) -> u32 {
+    if direction > 0 {
+        if value >= max { min } else { value + 1 }
+    } else if value <= min {
+        max
+    } else {
+        value - 1
     }
 }
 
@@ -710,8 +794,8 @@ pub fn handle_encode_keys(
                 if key.code == KeyCode::Esc {
                     *state.lora_popup = None;
                 } else if key.code == KeyCode::Enter {
-                    let field = LORA_FIELDS[popup.selected_field];
-                    if field == "Cancel" {
+                    let fields = lora_fields(popup.modem_choice);
+                    if fields.get(popup.selected_field) == Some(&"Cancel") {
                         *state.lora_popup = None;
                     }
                 }
@@ -1060,7 +1144,8 @@ pub fn draw_channel_popup(f: &mut Frame, state: &ChannelPopupState) {
 }
 
 pub fn draw_lora_popup(f: &mut Frame, state: &LoRaPopupState, area: ratatui::layout::Rect) {
-    let height = (LORA_FIELDS.len() + 2) as u16;
+    let fields = lora_fields(state.modem_choice);
+    let height = (fields.len() + 2) as u16;
     let popup_rect = match centered_popup(area, LORA_POPUP_WIDTH, height) {
         Some(rect) => rect,
         None => return,
@@ -1081,7 +1166,7 @@ pub fn draw_lora_popup(f: &mut Frame, state: &LoRaPopupState, area: ratatui::lay
 
     let inner = popup_rect.inner(ratatui::layout::Margin::new(1, 1));
 
-    let items: Vec<Line> = LORA_FIELDS
+    let items: Vec<Line> = fields
         .iter()
         .enumerate()
         .map(|(i, field)| {
@@ -1090,7 +1175,10 @@ pub fn draw_lora_popup(f: &mut Frame, state: &LoRaPopupState, area: ratatui::lay
 
             let value = match *field {
                 "Region" => state.region.to_mesh_string().to_string(),
-                "Modem Preset" => state.modem_preset.to_mesh_string().to_string(),
+                "Modem" => state.modem_choice.name().to_string(),
+                "Bandwidth" => format!("{} kHz", state.bandwidth),
+                "Spread Factor" => state.spread_factor.to_string(),
+                "Coding Rate" => format!("4/{}", state.coding_rate),
                 "TX Power" => {
                     if state.tx_power == 0 {
                         "0 (default)".to_string()
@@ -1101,7 +1189,6 @@ pub fn draw_lora_popup(f: &mut Frame, state: &LoRaPopupState, area: ratatui::lay
                 "Hop Limit" => format!("{}", state.hop_limit),
                 "Channel" => format!("{}", state.channel_num),
                 "TX Enabled" => if state.tx_enabled { "✓" } else { "✗" }.to_string(),
-                "Use Preset" => if state.use_preset { "✓" } else { "✗" }.to_string(),
                 "Override Freq" => format!("{} MHz", state.override_frequency),
                 "Freq Offset" => format!("{} kHz", state.frequency_offset),
                 "SX126x RX" => if state.sx126x_rx_boosted_gain {
@@ -1177,17 +1264,20 @@ pub fn handle_lora_popup_keys(
         return None;
     }
 
+    // The field list depends on the modem entry in use.
+    let fields = lora_fields(state.modem_choice);
+
     match key.code {
         KeyCode::Up => {
             if state.selected_field > 0 {
                 state.selected_field -= 1;
             } else {
-                state.selected_field = LORA_FIELDS.len() - 1;
+                state.selected_field = fields.len() - 1;
             }
             None
         }
         KeyCode::Down => {
-            if state.selected_field < LORA_FIELDS.len() - 1 {
+            if state.selected_field < fields.len() - 1 {
                 state.selected_field += 1;
             } else {
                 state.selected_field = 0;
@@ -1195,7 +1285,7 @@ pub fn handle_lora_popup_keys(
             None
         }
         _ => {
-            let field = LORA_FIELDS[state.selected_field];
+            let field = fields.get(state.selected_field).copied()?;
             let dir: isize = if cycle_backward { -1 } else { 1 };
             match field {
                 "Save" => {
@@ -1211,10 +1301,41 @@ pub fn handle_lora_popup_keys(
                     }
                     None
                 }
-                "Modem Preset" => {
+                "Modem" => {
                     if cycle_forward || cycle_backward {
-                        state.modem_preset =
-                            cycle_through(MODEM_PRESETS, state.modem_preset, cycle_forward);
+                        let choices = ModemChoice::all();
+                        state.modem_choice =
+                            cycle_through(&choices, state.modem_choice, cycle_forward);
+                        // Seed the manual fields from the preset that was on
+                        // screen, so switching to Custom starts somewhere sane.
+                        if let ModemChoice::Preset(preset) = state.modem_choice {
+                            let (bandwidth, spread_factor, coding_rate) = get_preset_params(preset);
+                            state.bandwidth = bandwidth;
+                            state.spread_factor = spread_factor;
+                            state.coding_rate = coding_rate;
+                        }
+                        state.selected_field = state
+                            .selected_field
+                            .min(lora_fields(state.modem_choice).len().saturating_sub(1));
+                    }
+                    None
+                }
+                "Bandwidth" => {
+                    if cycle_forward || cycle_backward {
+                        state.bandwidth =
+                            cycle_through(LORA_BANDWIDTHS, state.bandwidth, cycle_forward);
+                    }
+                    None
+                }
+                "Spread Factor" => {
+                    if cycle_forward || cycle_backward {
+                        state.spread_factor = step_in_range(state.spread_factor, dir, 7, 12);
+                    }
+                    None
+                }
+                "Coding Rate" => {
+                    if cycle_forward || cycle_backward {
+                        state.coding_rate = step_in_range(state.coding_rate, dir, 5, 8);
                     }
                     None
                 }
@@ -1275,12 +1396,6 @@ pub fn handle_lora_popup_keys(
                 "TX Enabled" => {
                     if cycle_forward || cycle_backward {
                         state.tx_enabled = !state.tx_enabled;
-                    }
-                    None
-                }
-                "Use Preset" => {
-                    if cycle_forward || cycle_backward {
-                        state.use_preset = !state.use_preset;
                     }
                     None
                 }
@@ -1883,6 +1998,27 @@ mod tests {
     }
 
     #[test]
+    fn the_lora_popup_renders_its_manual_fields() {
+        let popup = LoRaPopupState::from_lora(&decoded_custom_lora());
+        let mut terminal = Terminal::new(TestBackend::new(60, 30)).expect("test backend starts");
+
+        terminal
+            .draw(|f| draw_lora_popup(f, &popup, f.area()))
+            .expect("popup renders");
+
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+
+        assert!(rendered.contains("Custom"), "the modem field shows Custom");
+        assert!(rendered.contains("62 kHz"), "the bandwidth is shown");
+    }
+
+    #[test]
     fn lora_popup_renders_on_a_tiny_screen() {
         let popup = LoRaPopupState::new();
         let mut terminal = Terminal::new(TestBackend::new(3, 3)).expect("test backend starts");
@@ -1969,19 +2105,105 @@ mod tests {
     }
 
     #[test]
-    fn the_lora_popup_offers_every_modem_preset() {
-        let mut popup = LoRaPopupState::new();
-        let mut seen = Vec::new();
+    fn the_lora_popup_offers_every_modem_preset_and_custom() {
+        let choices = ModemChoice::all();
 
-        for _ in 0..MODEM_PRESETS.len() {
-            seen.push(popup.modem_preset);
-            popup.modem_preset = cycle_through(MODEM_PRESETS, popup.modem_preset, true);
+        for preset in MODEM_PRESETS {
+            assert!(
+                choices.contains(&ModemChoice::Preset(*preset)),
+                "{} is not offered",
+                preset.to_mesh_string()
+            );
         }
+        // Manual parameters are one more entry in the same field.
+        assert!(choices.contains(&ModemChoice::Custom));
+        assert_eq!(choices.len(), MODEM_PRESETS.len() + 1);
+    }
 
-        seen.sort_by_key(|preset| *preset as i32);
-        let mut expected: Vec<_> = MODEM_PRESETS.to_vec();
-        expected.sort_by_key(|preset| *preset as i32);
-        assert_eq!(seen, expected);
+    /// The URL that surfaced this: seven channels on manual LoRa parameters.
+    const CUSTOM_LORA_URL: &str = "https://meshtastic.org/e/#ChcSAQEaCk5hcnJvd0Zhc3QoATABOgIIDgoPEgECGgRUZXN0KAEwAToAChISAQEaB0dhbGljaWEoATABOgAKExIBARoIQUNvcnXDsWEoATABOgAKDRIBARoETHVnbygBMAEKEhIBARoHT3VyZW5zZSgBMAE6AAoTEgEBGgpQb250ZXZlZHJhKAEwARIdGD4gBygGOANAA0gBUBtYAWgBdURcWUTABgHIBgE";
+
+    fn decoded_custom_lora() -> LoRaInfo {
+        use meshurl::decoder::{DecodeResult, decode_url};
+
+        match decode_url(CUSTOM_LORA_URL).expect("the URL decodes") {
+            DecodeResult::Channel(config) => config.lora.expect("it carries a LoRa config"),
+            DecodeResult::Node(_) => panic!("expected a channel URL"),
+        }
+    }
+
+    #[test]
+    fn manual_parameters_survive_the_lora_popup() {
+        let lora = decoded_custom_lora();
+        assert_eq!(lora.modem.parameters(), (62, 7, 6));
+
+        // Open the popup and save without touching anything.
+        let saved = LoRaPopupState::from_lora(&lora).to_lora_info();
+
+        // These used to come back as LongFast's 250/11/5.
+        assert_eq!(saved.modem.parameters(), (62, 7, 6));
+        assert!(!saved.modem.uses_preset());
+        assert_eq!(saved.modem, lora.modem);
+    }
+
+    #[test]
+    fn a_manual_config_opens_on_the_custom_entry() {
+        let popup = LoRaPopupState::from_lora(&decoded_custom_lora());
+
+        assert_eq!(popup.modem_choice, ModemChoice::Custom);
+        assert_eq!(
+            (popup.bandwidth, popup.spread_factor, popup.coding_rate),
+            (62, 7, 6)
+        );
+    }
+
+    #[test]
+    fn the_popup_shows_the_manual_fields_only_when_needed() {
+        let preset_fields = lora_fields(ModemChoice::Preset(ModemPreset::LongFast));
+        assert!(!preset_fields.contains(&"Bandwidth"));
+
+        let custom_fields = lora_fields(ModemChoice::Custom);
+        assert!(custom_fields.contains(&"Bandwidth"));
+        assert!(custom_fields.contains(&"Spread Factor"));
+        assert!(custom_fields.contains(&"Coding Rate"));
+
+        // They sit right after the field that selects them.
+        let modem_at = custom_fields.iter().position(|f| *f == "Modem").unwrap();
+        assert_eq!(custom_fields[modem_at + 1], "Bandwidth");
+    }
+
+    #[test]
+    fn choosing_a_preset_replaces_the_manual_parameters() {
+        let mut popup = LoRaPopupState::from_lora(&decoded_custom_lora());
+        assert_eq!(popup.modem_choice, ModemChoice::Custom);
+
+        // Custom is the last entry, so one step forward wraps to the first preset.
+        let choices = ModemChoice::all();
+        popup.modem_choice = cycle_through(&choices, popup.modem_choice, true);
+
+        assert_eq!(
+            popup.modem_choice,
+            ModemChoice::Preset(ModemPreset::LongFast)
+        );
+        assert_eq!(popup.to_lora_info().modem.parameters(), (250, 11, 5));
+    }
+
+    #[test]
+    fn a_manual_config_survives_a_url_round_trip() {
+        use meshurl::decoder::{DecodeResult, decode_url};
+
+        let mut config = MeshtasticConfig::new();
+        config.channels.push("default".parse().unwrap());
+        config.lora = Some(LoRaPopupState::from_lora(&decoded_custom_lora()).to_lora_info());
+
+        let url = encode_url(&config).expect("encodes");
+        let lora = match decode_url(&url).expect("decodes") {
+            DecodeResult::Channel(config) => config.lora.expect("carries LoRa"),
+            DecodeResult::Node(_) => panic!("expected a channel URL"),
+        };
+
+        assert_eq!(lora.modem.parameters(), (62, 7, 6));
+        assert_eq!(lora.modem.name(), "Custom");
     }
 
     #[test]

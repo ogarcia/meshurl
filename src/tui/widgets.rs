@@ -213,6 +213,8 @@ pub fn lora_info_lines(lora: &LoRaInfo) -> Vec<Line<'_>> {
     let enabled_color = Color::Green;
     let disabled_color = Color::Red;
 
+    let (bandwidth, spread_factor, _coding_rate) = lora.modem.parameters();
+
     let all_lines = vec![
         Line::from(vec![
             Span::styled("Region: ", Style::default().fg(Color::DarkGray)),
@@ -223,16 +225,15 @@ pub fn lora_info_lines(lora: &LoRaInfo) -> Vec<Line<'_>> {
         ]),
         Line::from(vec![
             Span::styled("Modem Preset: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                lora.modem_preset.to_mesh_string(),
-                Style::default().fg(preset_color),
-            ),
+            // Says "Custom" for manual parameters, where there is no preset to
+            // name and the protobuf default would read as LongFast.
+            Span::styled(lora.modem.name(), Style::default().fg(preset_color)),
         ]),
         Line::from(vec![
             Span::styled("Use Preset: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                yes_no(lora.use_preset),
-                Style::default().fg(if lora.use_preset {
+                yes_no(lora.modem.uses_preset()),
+                Style::default().fg(if lora.modem.uses_preset() {
                     enabled_color
                 } else {
                     disabled_color
@@ -265,16 +266,13 @@ pub fn lora_info_lines(lora: &LoRaInfo) -> Vec<Line<'_>> {
         Line::from(vec![
             Span::styled("Bandwidth: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                format!("{} kHz", lora.bandwidth),
+                format!("{} kHz", bandwidth),
                 Style::default().fg(value_color),
             ),
         ]),
         Line::from(vec![
             Span::styled("Spread Factor: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                lora.spread_factor.to_string(),
-                Style::default().fg(value_color),
-            ),
+            Span::styled(spread_factor.to_string(), Style::default().fg(value_color)),
         ]),
         Line::from(vec![
             Span::styled("Hop Limit: ", Style::default().fg(Color::DarkGray)),

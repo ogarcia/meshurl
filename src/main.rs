@@ -3,8 +3,8 @@ mod tui;
 
 use clap::{Parser, ValueEnum};
 use meshurl::{
-    ChannelInfo, ChannelRole, LoRaInfo, MeshtasticConfig, ModemPreset, RegionCode, decode_url,
-    encoder, errors::EncodeError, get_preset_params,
+    ChannelInfo, ChannelRole, LoRaInfo, MeshtasticConfig, ModemConfig, ModemPreset, RegionCode,
+    decode_url, encoder, errors::EncodeError,
 };
 
 #[derive(Parser, Debug)]
@@ -254,25 +254,16 @@ fn encode_config(args: &EncodeArgs) -> Result<(MeshtasticConfig, String, String)
 }
 
 fn create_lora_config(args: &LoRaArgs) -> LoRaInfo {
-    let has_preset = args.region.is_some() || args.modem_preset.is_some();
-    let modem_preset = args.modem_preset.map(ModemPreset::from);
-
-    let (bandwidth, spread_factor, coding_rate) = if has_preset {
-        let preset = modem_preset.unwrap_or(ModemPreset::LongFast);
-        get_preset_params(preset)
-    } else {
-        (0, 0, 0)
-    };
+    let modem_preset = args
+        .modem_preset
+        .map_or(ModemPreset::LongFast, ModemPreset::from);
 
     LoRaInfo {
         region: args.region.map_or(RegionCode::Eu868, RegionCode::from),
-        modem_preset: modem_preset.unwrap_or(ModemPreset::LongFast),
-        use_preset: has_preset,
+        // The CLI only offers presets; manual parameters come from a decoded URL.
+        modem: ModemConfig::Preset(modem_preset),
         tx_enabled: true,
         tx_power: args.tx_power.unwrap_or(0),
-        bandwidth,
-        spread_factor,
-        coding_rate,
         hop_limit: args.hop_limit.unwrap_or(0),
         channel_num: args.channel_num.unwrap_or(0),
         override_duty_cycle: args.override_duty_cycle,

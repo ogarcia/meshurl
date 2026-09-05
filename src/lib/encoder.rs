@@ -93,7 +93,7 @@ fn encode_base64(data: &[u8]) -> Result<String, EncodeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{ChannelInfo, ChannelRole, DEFAULT_PSK, LoRaInfo, PskType};
+    use crate::models::{ChannelInfo, ChannelRole, DEFAULT_PSK, LoRaInfo, ModemConfig, PskType};
     use meshtastic_protobufs::meshtastic::config::lo_ra_config::{ModemPreset, RegionCode};
 
     #[test]
@@ -160,13 +160,9 @@ mod tests {
 
         let lora = LoRaInfo {
             region: RegionCode::Eu868,
-            modem_preset: ModemPreset::LongFast,
-            use_preset: true,
+            modem: ModemConfig::Preset(ModemPreset::LongFast),
             tx_enabled: true,
             tx_power: 0,
-            bandwidth: 250,
-            spread_factor: 11,
-            coding_rate: 5,
             hop_limit: 3,
             channel_num: 0,
             override_duty_cycle: false,
@@ -301,13 +297,9 @@ mod tests {
 
             let lora = LoRaInfo {
                 region: RegionCode::Us,
-                modem_preset: preset,
-                use_preset: true,
+                modem: ModemConfig::Preset(preset),
                 tx_enabled: true,
                 tx_power: 0,
-                bandwidth: 250,
-                spread_factor: 11,
-                coding_rate: 5,
                 hop_limit: 3,
                 channel_num: 0,
                 override_duty_cycle: false,
@@ -369,13 +361,9 @@ mod tests {
 
             let lora = LoRaInfo {
                 region,
-                modem_preset: ModemPreset::LongFast,
-                use_preset: true,
+                modem: ModemConfig::Preset(ModemPreset::LongFast),
                 tx_enabled: true,
                 tx_power: 0,
-                bandwidth: 250,
-                spread_factor: 11,
-                coding_rate: 5,
                 hop_limit: 3,
                 channel_num: 0,
                 override_duty_cycle: false,
@@ -483,13 +471,9 @@ mod tests {
 
         let lora = LoRaInfo {
             region: RegionCode::Us,
-            modem_preset: ModemPreset::LongFast,
-            use_preset: true,
+            modem: ModemConfig::Preset(ModemPreset::LongFast),
             tx_enabled: false,
             tx_power: 0,
-            bandwidth: 250,
-            spread_factor: 11,
-            coding_rate: 5,
             hop_limit: 3,
             channel_num: 0,
             override_duty_cycle: false,

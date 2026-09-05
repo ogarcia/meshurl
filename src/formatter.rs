@@ -154,13 +154,15 @@ pub fn print_lora(lora: &LoRaInfo) {
         "Region:".color(Color::White),
         lora.region.to_mesh_string().color(Color::BrightCyan)
     );
+    // A manual configuration has no preset to name; saying "LongFast" here was
+    // reporting the protobuf default as if it were a choice.
     println!(
         "    {} {}",
         "Modem Preset:".color(Color::White),
-        lora.modem_preset.to_mesh_string().color(Color::BrightCyan)
+        lora.modem.name().color(Color::BrightCyan)
     );
 
-    print_yes_no("Use Preset:", lora.use_preset);
+    print_yes_no("Use Preset:", lora.modem.uses_preset());
 
     if lora.tx_enabled {
         let tx_power_str = if lora.tx_power == 0 {
@@ -177,22 +179,18 @@ pub fn print_lora(lora: &LoRaInfo) {
         print_yes_no("TX enabled:", lora.tx_enabled);
     }
 
-    let preset_str = lora.modem_preset.to_mesh_string();
-    if !preset_str.is_empty() && preset_str != "Unset" {
-        println!(
-            "    {} {} kHz",
-            "Bandwidth:".color(Color::White),
-            lora.bandwidth
-        );
+    let (bandwidth, spread_factor, coding_rate) = lora.modem.parameters();
+    if bandwidth > 0 {
+        println!("    {} {} kHz", "Bandwidth:".color(Color::White), bandwidth);
         println!(
             "    {} {}",
             "Spread Factor:".color(Color::White),
-            lora.spread_factor
+            spread_factor
         );
         println!(
             "    {} 4/{}",
             "Coding Rate:".color(Color::White),
-            lora.coding_rate
+            coding_rate
         );
     }
 

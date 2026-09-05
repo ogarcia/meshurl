@@ -36,8 +36,8 @@ pub use encoder::{
 };
 pub use errors::{DecodeError, EncodeError};
 pub use models::{
-    ChannelInfo, ChannelRole, DEFAULT_PSK, LoRaInfo, MAX_CHANNEL_NAME_BYTES,
+    CUSTOM_MODEM_NAME, ChannelInfo, ChannelRole, DEFAULT_PSK, LoRaInfo, MAX_CHANNEL_NAME_BYTES,
     MESHTASTIC_CHANNEL_URL_BASE, MESHTASTIC_NODE_URL_BASE, MODEM_PRESETS, MeshtasticConfig,
-    MeshtasticDisplay, NodeInfo, POSITION_OPTIONS, PskMode, PskType, REGION_CODES,
+    MeshtasticDisplay, ModemConfig, NodeInfo, POSITION_OPTIONS, PskMode, PskType, REGION_CODES,
     generate_random_psk, get_preset_params, hash_phrase_to_psk, validate_channel_name,
 };
