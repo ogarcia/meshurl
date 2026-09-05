@@ -444,7 +444,11 @@ impl std::str::FromStr for ChannelInfo {
                 "uplink" | "up" => uplink = true,
                 "downlink" | "down" => downlink = true,
                 "pos" | "precision" => {
-                    position_precision = value.and_then(|v| v.parse().ok());
+                    // A precision of 0 means disabled, which is the absence of
+                    // the setting rather than a value to encode.
+                    position_precision = value
+                        .and_then(|v| v.parse().ok())
+                        .filter(|precision| *precision > 0);
                 }
                 "muted" | "mute" => muted = true,
                 _ => return Err(format!("Unknown option: {}", key)),
@@ -1013,6 +1017,14 @@ mod tests {
         let channel: ChannelInfo = "n=TestChannel,pos=3".parse().unwrap();
         assert_eq!(channel.name, "TestChannel");
         assert_eq!(channel.position_precision, Some(3));
+    }
+
+    #[test]
+    fn test_channel_info_position_zero_is_disabled() {
+        // Encoding a precision of 0 adds a ModuleSettings message that only
+        // says the feature is off.
+        let channel: ChannelInfo = "n=Test,pos=0".parse().unwrap();
+        assert_eq!(channel.position_precision, None);
     }
 
     #[test]

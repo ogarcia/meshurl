@@ -365,7 +365,11 @@ impl ChannelPopupState {
                 psk_type,
                 uplink_enabled: self.uplink_enabled,
                 downlink_enabled: self.downlink_enabled,
-                position_precision: Some(POSITION_OPTIONS[self.position_index].1),
+                // "Disabled" is the absence of the setting, not a precision of 0.
+                position_precision: match POSITION_OPTIONS[self.position_index].1 {
+                    0 => None,
+                    precision => Some(precision),
+                },
                 is_client_muted: self.muted,
             },
         ))
@@ -1694,6 +1698,41 @@ mod tests {
 
         assert_eq!(popup.psk_mode, PskModeKind::Passphrase);
         assert!(popup.psk_value.is_empty());
+    }
+
+    #[test]
+    fn a_disabled_position_is_left_out() {
+        let popup = ChannelPopupState::new();
+        assert_eq!(POSITION_OPTIONS[popup.position_index].1, 0);
+
+        let (_, channel) = popup.to_channel_info(0).expect("saves");
+
+        assert_eq!(channel.position_precision, None);
+    }
+
+    #[test]
+    fn a_selected_position_is_kept() {
+        let mut popup = ChannelPopupState::new();
+        popup.position_index = POSITION_OPTIONS
+            .iter()
+            .position(|(_, precision)| *precision == 14)
+            .expect("14 is one of the offered precisions");
+
+        let (_, channel) = popup.to_channel_info(0).expect("saves");
+
+        assert_eq!(channel.position_precision, Some(14));
+    }
+
+    #[test]
+    fn a_disabled_position_adds_no_module_settings() {
+        use meshtastic_protobufs::meshtastic::ChannelSettings;
+
+        let popup = ChannelPopupState::new();
+        let (_, channel) = popup.to_channel_info(0).expect("saves");
+
+        let settings = ChannelSettings::from(&channel);
+
+        assert!(settings.module_settings.is_none());
     }
 
     #[test]
