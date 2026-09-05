@@ -30,3 +30,6 @@ prost = "0.13"
 ratatui = "0.30"
 ratatui-textarea = "0.9"
 sha2 = "0.11"
+
+[target."cfg(unix)".dependencies]
+libc = "0.2.189"

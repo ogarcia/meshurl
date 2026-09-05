@@ -176,7 +176,27 @@ impl From<ModemPresetArg> for ModemPreset {
     }
 }
 
+/// Restores the default handling of `SIGPIPE`.
+///
+/// Rust ignores the signal at startup, which turns a closed pipe into a write
+/// error and makes `println!` panic. For a command line tool that means
+/// `meshurl decode <url> | head` reports a "Broken pipe" panic where it should
+/// simply stop, so hand the signal back to the kernel default.
+#[cfg(unix)]
+fn restore_sigpipe_default() {
+    // SAFETY: setting a signal disposition to SIG_DFL is async-signal-safe and
+    // happens before any thread is spawned.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
+#[cfg(not(unix))]
+fn restore_sigpipe_default() {}
+
 fn main() {
+    restore_sigpipe_default();
+
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() == 1 {
