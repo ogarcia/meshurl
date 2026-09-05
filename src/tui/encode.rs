@@ -33,6 +33,9 @@ const LORA_POPUP_WIDTH: u16 = 40;
 /// Preferred size of the list overlay that picks a region or modem.
 const LIST_POPUP_WIDTH: u16 = 44;
 const LIST_POPUP_MAX_HEIGHT: u16 = 20;
+/// Preferred size of the box for typing a numeric value.
+const NUMERIC_INPUT_WIDTH: u16 = 36;
+const NUMERIC_INPUT_HEIGHT: u16 = 3;
 /// Preferred size of the single-line input overlays.
 const INPUT_OVERLAY_WIDTH: u16 = 40;
 const INPUT_OVERLAY_HEIGHT: u16 = 3;
@@ -151,6 +154,124 @@ impl ModemChoice {
 pub enum ListChoice {
     Region,
     Modem,
+    HopLimit,
+}
+
+/// A numeric field being typed into.
+///
+/// These take too many values to pick from a list, so Enter opens a box to
+/// type one rather than making it be reached one arrow press at a time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NumericField {
+    TxPower,
+    Channel,
+    OverrideFrequency,
+    FrequencyOffset,
+}
+
+impl NumericField {
+    fn title(self) -> &'static str {
+        match self {
+            NumericField::TxPower => " TX Power (dBm) ",
+            NumericField::Channel => " Channel ",
+            NumericField::OverrideFrequency => " Override Frequency (MHz) ",
+            NumericField::FrequencyOffset => " Frequency Offset (kHz) ",
+        }
+    }
+
+    /// What the field accepts, shown under the box.
+    fn hint(self) -> &'static str {
+        match self {
+            NumericField::TxPower => " 0-30, 0 for the regional maximum ",
+            NumericField::Channel => " 0-255, 0 to pick automatically ",
+            NumericField::OverrideFrequency => " 0 to use the region default ",
+            NumericField::FrequencyOffset => " -100 to 100 ",
+        }
+    }
+
+    /// The value currently held, as it should appear in the box.
+    fn current(self, state: &LoRaPopupState) -> String {
+        match self {
+            NumericField::TxPower => state.tx_power.to_string(),
+            NumericField::Channel => state.channel_num.to_string(),
+            NumericField::OverrideFrequency => state.override_frequency.to_string(),
+            NumericField::FrequencyOffset => state.frequency_offset.to_string(),
+        }
+    }
+
+    /// Parses `text` and stores it, or explains why it cannot.
+    fn apply(self, state: &mut LoRaPopupState, text: &str) -> Result<(), String> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err("Enter a value".to_string());
+        }
+
+        match self {
+            NumericField::TxPower => {
+                let value: i32 = text.parse().map_err(|_| "Not a whole number".to_string())?;
+                if !(0..=MAX_TX_POWER).contains(&value) {
+                    return Err(format!("TX power must be 0 to {}", MAX_TX_POWER));
+                }
+                state.tx_power = value;
+            }
+            NumericField::Channel => {
+                let value: u32 = text.parse().map_err(|_| "Not a whole number".to_string())?;
+                if value > MAX_CHANNEL_NUM {
+                    return Err(format!("Channel must be 0 to {}", MAX_CHANNEL_NUM));
+                }
+                state.channel_num = value;
+            }
+            NumericField::OverrideFrequency => {
+                let value: f32 = text.parse().map_err(|_| "Not a number".to_string())?;
+                if !value.is_finite() || value < 0.0 {
+                    return Err("Frequency cannot be negative".to_string());
+                }
+                state.override_frequency = value;
+            }
+            NumericField::FrequencyOffset => {
+                let value: f32 = text.parse().map_err(|_| "Not a number".to_string())?;
+                if !value.is_finite() || value.abs() > MAX_FREQUENCY_OFFSET {
+                    return Err(format!("Offset must be -{0} to {0}", MAX_FREQUENCY_OFFSET));
+                }
+                state.frequency_offset = value;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// The field name shown in the popup, mapped to the box it opens.
+fn numeric_field_for(field: &str) -> Option<NumericField> {
+    match field {
+        "TX Power" => Some(NumericField::TxPower),
+        "Channel" => Some(NumericField::Channel),
+        "Override Freq" => Some(NumericField::OverrideFrequency),
+        "Freq Offset" => Some(NumericField::FrequencyOffset),
+        _ => None,
+    }
+}
+
+/// An open numeric input box and what has been typed into it.
+pub struct NumericInputState {
+    pub field: NumericField,
+    pub textarea: TextArea<'static>,
+}
+
+impl NumericInputState {
+    /// Opens the box on the value currently held.
+    fn new(field: NumericField, state: &LoRaPopupState) -> Self {
+        let mut textarea = TextArea::new(vec![field.current(state)]);
+        textarea.move_cursor(CursorMove::End);
+        Self { field, textarea }
+    }
+
+    fn text(&self) -> String {
+        self.textarea
+            .lines()
+            .first()
+            .map_or(String::new(), |line| line.to_string())
+    }
 }
 
 /// An open list overlay and the entry highlighted in it.
@@ -172,6 +293,7 @@ impl ListPopupState {
         match self.choice {
             ListChoice::Region => REGION_CODES.len(),
             ListChoice::Modem => ModemChoice::all().len(),
+            ListChoice::HopLimit => HOP_LIMITS.len(),
         }
     }
 
@@ -181,6 +303,17 @@ impl ListPopupState {
             ListChoice::Region => REGION_CODES
                 .iter()
                 .map(|region| (region.to_mesh_string().to_string(), String::new()))
+                .collect(),
+            ListChoice::HopLimit => HOP_LIMITS
+                .iter()
+                .map(|hops| {
+                    let detail = match hops {
+                        1 => "direct only".to_string(),
+                        2 => "up to 1 relay".to_string(),
+                        _ => format!("up to {} relays", hops - 1),
+                    };
+                    (hops.to_string(), detail)
+                })
                 .collect(),
             ListChoice::Modem => ModemChoice::all()
                 .iter()
@@ -203,6 +336,7 @@ impl ListPopupState {
         match self.choice {
             ListChoice::Region => " Region ",
             ListChoice::Modem => " Modem ",
+            ListChoice::HopLimit => " Hop Limit ",
         }
     }
 }
@@ -230,6 +364,8 @@ pub struct LoRaPopupState {
     pub selected_field: usize,
     /// The list overlay, when one is open.
     pub list_popup: Option<ListPopupState>,
+    /// The numeric input box, when one is open.
+    pub numeric_input: Option<NumericInputState>,
 }
 
 impl LoRaPopupState {
@@ -256,6 +392,7 @@ impl LoRaPopupState {
             ok_mqtt: false,
             selected_field: 0,
             list_popup: None,
+            numeric_input: None,
         }
     }
 
@@ -286,6 +423,7 @@ impl LoRaPopupState {
             ok_mqtt: lora.config_ok_to_mqtt,
             selected_field: 0,
             list_popup: None,
+            numeric_input: None,
         }
     }
 
@@ -542,6 +680,16 @@ impl ChannelPopupState {
         ))
     }
 }
+
+/// Limits the LoRa fields accept.
+const MAX_TX_POWER: i32 = 30;
+const MAX_CHANNEL_NUM: u32 = 255;
+const MAX_FREQUENCY_OFFSET: f32 = 100.0;
+
+/// Hops a packet may take, as the firmware allows.
+const MIN_HOPS: u32 = 1;
+const MAX_HOPS: u32 = 7;
+const HOP_LIMITS: &[u32] = &[1, 2, 3, 4, 5, 6, 7];
 
 /// Bandwidths the LoRa radios support, in kHz.
 const LORA_BANDWIDTHS: &[u32] = &[31, 62, 125, 250, 500];
@@ -849,6 +997,10 @@ pub fn draw_encode_mode(f: &mut Frame, state: &mut EncodeDrawState) {
         if let Some(list_state) = &lora_state.list_popup {
             draw_list_popup(f, list_state, f.area());
         }
+
+        if let Some(input_state) = &lora_state.numeric_input {
+            draw_numeric_input(f, input_state, f.area());
+        }
     }
 }
 
@@ -926,9 +1078,9 @@ pub fn handle_encode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut 
     if state.lora_popup.is_some() {
         let popup = state.lora_popup.as_mut().unwrap();
 
-        // Esc closes one layer at a time: the list overlay consumes its own,
-        // and only a popup with nothing on top of it closes here.
-        let list_was_open = popup.list_popup.is_some();
+        // Esc closes one layer at a time: an overlay consumes its own, and only
+        // a popup with nothing on top of it closes here.
+        let overlay_was_open = popup.list_popup.is_some() || popup.numeric_input.is_some();
 
         let result = handle_lora_popup_keys(key, popup, state.toast);
 
@@ -938,9 +1090,9 @@ pub fn handle_encode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut 
                 *state.lora_popup = None;
             }
             None => {
-                if key.code == KeyCode::Esc && !list_was_open {
+                if key.code == KeyCode::Esc && !overlay_was_open {
                     *state.lora_popup = None;
-                } else if key.code == KeyCode::Enter && !list_was_open {
+                } else if key.code == KeyCode::Enter && !overlay_was_open {
                     let fields = lora_fields(popup.modem_choice);
                     if fields.get(popup.selected_field) == Some(&"Cancel") {
                         *state.lora_popup = None;
@@ -1378,6 +1530,33 @@ pub fn draw_lora_popup(f: &mut Frame, state: &LoRaPopupState, area: ratatui::lay
     f.render_widget(list, inner);
 }
 
+/// Draws the box for typing a numeric value.
+pub fn draw_numeric_input(f: &mut Frame, state: &NumericInputState, area: Rect) {
+    let Some(rect) = centered_popup(area, NUMERIC_INPUT_WIDTH, NUMERIC_INPUT_HEIGHT) else {
+        return;
+    };
+
+    f.render_widget(Clear, rect);
+
+    let block = Block::default()
+        .title(state.field.title())
+        .title_bottom(Line::from(state.field.hint()).centered())
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Green))
+        .title_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        );
+    f.render_widget(block, rect);
+
+    let inner = rect.inner(ratatui::layout::Margin::new(1, 1));
+    let mut textarea = state.textarea.clone();
+    textarea.set_cursor_line_style(Style::default());
+    textarea.set_block(Block::default().borders(Borders::NONE));
+    f.render_widget(&textarea, inner);
+}
+
 /// Draws the list overlay for the region or modem field.
 ///
 /// The list scrolls to keep the highlighted entry visible, so a region near the
@@ -1434,6 +1613,27 @@ pub fn handle_lora_popup_keys(
 ) -> Option<LoRaInfo> {
     use ratatui::crossterm::event::KeyCode;
 
+    // The input box owns the keyboard while it is open, so digits and the minus
+    // sign reach the text area instead of being read as popup commands.
+    if let Some(input) = state.numeric_input.as_mut() {
+        match key.code {
+            KeyCode::Enter => {
+                let field = input.field;
+                let text = input.text();
+                match field.apply(state, &text) {
+                    Ok(()) => state.numeric_input = None,
+                    // Keep the box open so the typed value is not lost.
+                    Err(message) => show_toast(toast, &message, false),
+                }
+            }
+            KeyCode::Esc => state.numeric_input = None,
+            _ => {
+                input.textarea.input(key);
+            }
+        }
+        return None;
+    }
+
     // The list overlay owns the keyboard while it is open.
     if let Some(list) = state.list_popup.as_mut() {
         match key.code {
@@ -1456,6 +1656,11 @@ pub fn handle_lora_popup_keys(
                     ListChoice::Modem => {
                         if let Some(choice) = ModemChoice::all().get(list.selected) {
                             report_region_move(state.select_modem(*choice), *choice, toast);
+                        }
+                    }
+                    ListChoice::HopLimit => {
+                        if let Some(hops) = HOP_LIMITS.get(list.selected) {
+                            state.hop_limit = *hops;
                         }
                     }
                 }
@@ -1500,6 +1705,12 @@ pub fn handle_lora_popup_keys(
         }
         _ => {
             let field = fields.get(state.selected_field).copied()?;
+
+            if is_enter && let Some(numeric) = numeric_field_for(field) {
+                state.numeric_input = Some(NumericInputState::new(numeric, state));
+                return None;
+            }
+
             let dir: isize = if cycle_backward { -1 } else { 1 };
             match field {
                 "Save" => {
@@ -1576,19 +1787,13 @@ pub fn handle_lora_popup_keys(
                 }
                 "Hop Limit" => {
                     if cycle_forward || cycle_backward {
-                        state.hop_limit = if dir > 0 {
-                            if state.hop_limit < 7 {
-                                state.hop_limit + 1
-                            } else {
-                                1
-                            }
-                        } else {
-                            if state.hop_limit > 1 {
-                                state.hop_limit - 1
-                            } else {
-                                7
-                            }
-                        };
+                        state.hop_limit = step_in_range(state.hop_limit, dir, MIN_HOPS, MAX_HOPS);
+                    } else if is_enter {
+                        let current = HOP_LIMITS
+                            .iter()
+                            .position(|hops| *hops == state.hop_limit)
+                            .unwrap_or(0);
+                        state.list_popup = Some(ListPopupState::new(ListChoice::HopLimit, current));
                     }
                     None
                 }
@@ -2489,6 +2694,285 @@ mod tests {
             .expect("NarrowFast is offered");
         assert_eq!(name, "NARROW_FAST");
         assert_eq!(detail, "62.5 kHz  SF7  4/6");
+    }
+
+    /// Renders a LoRa popup and returns the text on screen.
+    fn render_lora(popup: &LoRaPopupState) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(80, 40)).expect("test backend starts");
+        terminal
+            .draw(|f| {
+                draw_lora_popup(f, popup, f.area());
+                if let Some(list) = &popup.list_popup {
+                    draw_list_popup(f, list, f.area());
+                }
+                if let Some(input) = &popup.numeric_input {
+                    draw_numeric_input(f, input, f.area());
+                }
+            })
+            .expect("the popup renders");
+
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn the_numeric_box_shows_its_title_hint_and_value() {
+        let mut popup = LoRaPopupState::new();
+        popup.tx_power = 17;
+        focus_lora_field(&mut popup, "TX Power");
+        lora_key(&mut popup, KeyCode::Enter);
+
+        let screen = render_lora(&popup);
+
+        assert!(screen.contains("TX Power (dBm)"), "the title");
+        assert!(screen.contains("0-30"), "the accepted range");
+        assert!(screen.contains("17"), "the current value");
+    }
+
+    #[test]
+    fn a_value_typed_into_the_box_reaches_the_field() {
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "TX Power");
+        lora_key(&mut popup, KeyCode::Enter);
+        popup.numeric_input.as_mut().unwrap().textarea = TextArea::default();
+
+        // Type it a key at a time, as a user would.
+        let mut toast = None;
+        for code in [KeyCode::Char('2'), KeyCode::Char('2')] {
+            handle_lora_popup_keys(KeyEvent::from(code), &mut popup, &mut toast);
+        }
+        handle_lora_popup_keys(KeyEvent::from(KeyCode::Enter), &mut popup, &mut toast);
+
+        assert_eq!(popup.tx_power, 22);
+        assert!(popup.numeric_input.is_none());
+        // And the popup shows it.
+        assert!(render_lora(&popup).contains("22 dBm"));
+    }
+
+    #[test]
+    fn the_hop_limit_list_reads_well() {
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "Hop Limit");
+        lora_key(&mut popup, KeyCode::Enter);
+
+        let screen = render_lora(&popup);
+
+        assert!(screen.contains("direct only"), "one hop is direct");
+        assert!(screen.contains("up to 1 relay "), "singular for two hops");
+        assert!(screen.contains("up to 6 relays"), "plural beyond that");
+    }
+
+    #[test]
+    fn enter_opens_the_hop_limit_list() {
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "Hop Limit");
+
+        lora_key(&mut popup, KeyCode::Enter);
+
+        let list = popup.list_popup.as_ref().expect("the list opened");
+        assert_eq!(list.choice, ListChoice::HopLimit);
+        assert_eq!(HOP_LIMITS[list.selected], 3, "opens on the current value");
+        assert_eq!(list.entries().len(), 7, "one entry per hop count");
+    }
+
+    #[test]
+    fn the_hop_limit_list_picks_a_value() {
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "Hop Limit");
+        lora_key(&mut popup, KeyCode::Enter);
+
+        lora_key(&mut popup, KeyCode::End);
+        lora_key(&mut popup, KeyCode::Enter);
+
+        assert_eq!(popup.hop_limit, 7);
+        assert!(popup.list_popup.is_none());
+    }
+
+    #[test]
+    fn cycling_the_hop_limit_stays_within_range() {
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "Hop Limit");
+
+        for _ in 0..10 {
+            lora_key(&mut popup, KeyCode::Right);
+        }
+        assert!((MIN_HOPS..=MAX_HOPS).contains(&popup.hop_limit));
+
+        for _ in 0..20 {
+            lora_key(&mut popup, KeyCode::Left);
+        }
+        assert!((MIN_HOPS..=MAX_HOPS).contains(&popup.hop_limit));
+    }
+
+    /// Types `text` into an open numeric box and commits it.
+    fn type_into_box(popup: &mut LoRaPopupState, text: &str, toast: &mut Option<ToastMessage>) {
+        popup
+            .numeric_input
+            .as_mut()
+            .expect("the box is open")
+            .textarea = TextArea::new(vec![text.to_string()]);
+        handle_lora_popup_keys(KeyEvent::from(KeyCode::Enter), popup, toast);
+    }
+
+    #[test]
+    fn enter_opens_a_box_for_the_numeric_fields() {
+        for (field, expected) in [
+            ("TX Power", NumericField::TxPower),
+            ("Channel", NumericField::Channel),
+            ("Override Freq", NumericField::OverrideFrequency),
+            ("Freq Offset", NumericField::FrequencyOffset),
+        ] {
+            let mut popup = LoRaPopupState::new();
+            focus_lora_field(&mut popup, field);
+
+            lora_key(&mut popup, KeyCode::Enter);
+
+            let input = popup
+                .numeric_input
+                .as_ref()
+                .unwrap_or_else(|| panic!("{} did not open a box", field));
+            assert_eq!(input.field, expected);
+        }
+    }
+
+    #[test]
+    fn the_box_opens_on_the_current_value() {
+        let mut popup = LoRaPopupState::new();
+        popup.tx_power = 17;
+        focus_lora_field(&mut popup, "TX Power");
+
+        lora_key(&mut popup, KeyCode::Enter);
+
+        assert_eq!(popup.numeric_input.as_ref().unwrap().text(), "17");
+    }
+
+    #[test]
+    fn a_typed_value_is_taken() {
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "TX Power");
+        lora_key(&mut popup, KeyCode::Enter);
+
+        let mut toast = None;
+        type_into_box(&mut popup, "22", &mut toast);
+
+        assert_eq!(popup.tx_power, 22);
+        assert!(popup.numeric_input.is_none(), "the box closed");
+        assert!(toast.is_none());
+    }
+
+    #[test]
+    fn a_typed_frequency_keeps_its_decimals() {
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "Override Freq");
+        lora_key(&mut popup, KeyCode::Enter);
+
+        let mut toast = None;
+        type_into_box(&mut popup, "869.525", &mut toast);
+
+        assert_eq!(popup.override_frequency, 869.525);
+    }
+
+    #[test]
+    fn a_negative_offset_is_accepted() {
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "Freq Offset");
+        lora_key(&mut popup, KeyCode::Enter);
+
+        let mut toast = None;
+        type_into_box(&mut popup, "-12.5", &mut toast);
+
+        assert_eq!(popup.frequency_offset, -12.5);
+    }
+
+    #[test]
+    fn a_value_out_of_range_is_refused() {
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "TX Power");
+        lora_key(&mut popup, KeyCode::Enter);
+
+        let mut toast = None;
+        type_into_box(&mut popup, "99", &mut toast);
+
+        assert_eq!(popup.tx_power, 0, "the value is not taken");
+        assert!(popup.numeric_input.is_some(), "the box stays open");
+        assert!(toast.expect("reported").text.contains("0 to 30"));
+    }
+
+    #[test]
+    fn text_that_is_not_a_number_is_refused() {
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "Channel");
+        lora_key(&mut popup, KeyCode::Enter);
+
+        let mut toast = None;
+        type_into_box(&mut popup, "abc", &mut toast);
+
+        assert_eq!(popup.channel_num, 0);
+        assert!(popup.numeric_input.is_some());
+        assert!(toast.expect("reported").text.contains("whole number"));
+    }
+
+    #[test]
+    fn an_empty_box_is_refused() {
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "TX Power");
+        lora_key(&mut popup, KeyCode::Enter);
+
+        let mut toast = None;
+        type_into_box(&mut popup, "", &mut toast);
+
+        assert!(popup.numeric_input.is_some());
+        assert!(toast.expect("reported").text.contains("Enter a value"));
+    }
+
+    #[test]
+    fn esc_closes_the_box_without_taking_the_value() {
+        let mut popup = LoRaPopupState::new();
+        popup.tx_power = 5;
+        focus_lora_field(&mut popup, "TX Power");
+        lora_key(&mut popup, KeyCode::Enter);
+        popup.numeric_input.as_mut().unwrap().textarea = TextArea::new(vec!["30".to_string()]);
+
+        lora_key(&mut popup, KeyCode::Esc);
+
+        assert!(popup.numeric_input.is_none());
+        assert_eq!(popup.tx_power, 5, "the old value stands");
+    }
+
+    #[test]
+    fn digits_reach_the_box_instead_of_the_popup() {
+        // '1' and '2' switch mode elsewhere, and space cycles a field; while
+        // the box is open they are just characters.
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "Channel");
+        lora_key(&mut popup, KeyCode::Enter);
+        popup.numeric_input.as_mut().unwrap().textarea = TextArea::default();
+
+        for code in [KeyCode::Char('1'), KeyCode::Char('2')] {
+            lora_key(&mut popup, code);
+        }
+
+        assert_eq!(popup.numeric_input.as_ref().unwrap().text(), "12");
+    }
+
+    #[test]
+    fn esc_closes_the_numeric_box_but_not_the_lora_popup() {
+        let mut config = MeshtasticConfig::new();
+        let mut list_state = ListState::default();
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "TX Power");
+        let input = NumericInputState::new(NumericField::TxPower, &popup);
+        popup.numeric_input = Some(input);
+
+        let lora_popup = press_with_lora(&mut config, &mut list_state, KeyCode::Esc, popup);
+
+        let popup = lora_popup.expect("the LoRa popup is still open");
+        assert!(popup.numeric_input.is_none(), "the box closed");
     }
 
     #[test]

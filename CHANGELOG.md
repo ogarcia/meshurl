@@ -35,10 +35,11 @@ the fidelity of what is encoded and displayed.
   lose the value on the way back out.
 - The 2.4 GHz band (`LORA_24`) now gets the wider bandwidths the firmware uses
   there, instead of the narrow band figures.
-- Enter on the Region or Modem field of the LoRa popup opens a list of every
-  value, rather than making them be cycled through one arrow press at a time.
-  The modem list shows each preset's bandwidth, spreading factor and coding
-  rate.
+- Enter on a LoRa field now opens the right thing for it, rather than making
+  every value be reached one arrow press at a time. Region, Modem and Hop Limit
+  open a list of every value; TX Power, Channel and the two frequencies open a
+  box to type one into, checked against the range the field accepts. The modem
+  list shows each preset's bandwidth, spreading factor and coding rate.
 - Choosing a modem preset moves the region to the one it requires, as the
   firmware does: picking NarrowFast on EU_868 switches to EU_N_868 there and
   then, and a toast says so. Choosing a region moves the preset the same way,
