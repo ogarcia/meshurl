@@ -112,6 +112,50 @@ impl MeshtasticDisplay for ModemPreset {
     }
 }
 
+/// Every region a user can select, in the order the protobuf declares them.
+///
+/// `RegionCode::Unset` is deliberately absent: it is the unconfigured state, not
+/// something to choose. Keeping the single list here stops the CLI, the TUI and
+/// the string parser from drifting apart, which is how seven regions ended up
+/// reachable from a decoded URL but not from either interface.
+pub const REGION_CODES: &[RegionCode] = &[
+    RegionCode::Us,
+    RegionCode::Eu433,
+    RegionCode::Eu868,
+    RegionCode::Cn,
+    RegionCode::Jp,
+    RegionCode::Anz,
+    RegionCode::Kr,
+    RegionCode::Tw,
+    RegionCode::Ru,
+    RegionCode::In,
+    RegionCode::Nz865,
+    RegionCode::Th,
+    RegionCode::Lora24,
+    RegionCode::Ua433,
+    RegionCode::Ua868,
+    RegionCode::My433,
+    RegionCode::My919,
+    RegionCode::Sg923,
+    RegionCode::Ph433,
+    RegionCode::Ph868,
+    RegionCode::Ph915,
+    RegionCode::Anz433,
+];
+
+/// Every modem preset a user can select.
+pub const MODEM_PRESETS: &[ModemPreset] = &[
+    ModemPreset::LongFast,
+    ModemPreset::LongSlow,
+    ModemPreset::VeryLongSlow,
+    ModemPreset::MediumSlow,
+    ModemPreset::MediumFast,
+    ModemPreset::ShortSlow,
+    ModemPreset::ShortFast,
+    ModemPreset::LongModerate,
+    ModemPreset::ShortTurbo,
+];
+
 /// Position precision options for Meshtastic channels.
 /// Each tuple contains (display_name, precision_bits).
 /// Values 0-32 represent precision bits:

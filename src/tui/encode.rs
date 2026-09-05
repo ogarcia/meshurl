@@ -1,8 +1,9 @@
 use base64::Engine;
-use meshurl::encoder::{encode_url, modem_preset_from_str, region_code_from_str};
+use meshurl::encoder::{ModemPreset, RegionCode, encode_url};
 use meshurl::models::{
-    ChannelInfo, ChannelRole, DEFAULT_PSK, LoRaInfo, MeshtasticDisplay, POSITION_OPTIONS, PskType,
-    generate_random_psk, get_preset_params, hash_phrase_to_psk,
+    ChannelInfo, ChannelRole, DEFAULT_PSK, LoRaInfo, MODEM_PRESETS, MeshtasticDisplay,
+    POSITION_OPTIONS, PskType, REGION_CODES, generate_random_psk, get_preset_params,
+    hash_phrase_to_psk,
 };
 use ratatui::{
     Frame,
@@ -106,8 +107,8 @@ pub struct ChannelPopupState {
 }
 
 pub struct LoRaPopupState {
-    pub region: String,
-    pub modem_preset: String,
+    pub region: RegionCode,
+    pub modem_preset: ModemPreset,
     pub tx_power: i32,
     pub hop_limit: u32,
     pub channel_num: u32,
@@ -126,8 +127,8 @@ pub struct LoRaPopupState {
 impl LoRaPopupState {
     pub fn new() -> Self {
         Self {
-            region: "EU868".to_string(),
-            modem_preset: "LongFast".to_string(),
+            region: RegionCode::Eu868,
+            modem_preset: ModemPreset::LongFast,
             tx_power: 0,
             hop_limit: 3,
             channel_num: 0,
@@ -145,12 +146,9 @@ impl LoRaPopupState {
     }
 
     pub fn from_lora(lora: &LoRaInfo) -> Self {
-        let region = lora.region.to_mesh_string().to_string();
-        let modem_preset = lora.modem_preset.to_mesh_string().to_string();
-
         Self {
-            region,
-            modem_preset,
+            region: lora.region,
+            modem_preset: lora.modem_preset,
             tx_power: lora.tx_power,
             hop_limit: lora.hop_limit,
             channel_num: lora.channel_num,
@@ -168,14 +166,11 @@ impl LoRaPopupState {
     }
 
     pub fn to_lora_info(&self) -> LoRaInfo {
-        let region = region_code_from_str(&self.region);
-        let modem_preset = modem_preset_from_str(&self.modem_preset);
-
-        let (bandwidth, spread_factor, coding_rate) = get_preset_params(modem_preset);
+        let (bandwidth, spread_factor, coding_rate) = get_preset_params(self.modem_preset);
 
         LoRaInfo {
-            region,
-            modem_preset,
+            region: self.region,
+            modem_preset: self.modem_preset,
             use_preset: self.use_preset,
             tx_enabled: self.tx_enabled,
             tx_power: self.tx_power,
@@ -195,23 +190,6 @@ impl LoRaPopupState {
         }
     }
 }
-
-const LORA_REGIONS: &[&str] = &[
-    "US", "EU433", "EU868", "CN", "JP", "ANZ", "KR", "TW", "RU", "IN", "NZ865", "TH", "Lora24",
-    "UA433", "UA868",
-];
-
-const LORA_MODEM_PRESETS: &[&str] = &[
-    "LongFast",
-    "LongSlow",
-    "VeryLongSlow",
-    "MediumSlow",
-    "MediumFast",
-    "ShortSlow",
-    "ShortFast",
-    "LongModerate",
-    "ShortTurbo",
-];
 
 const LORA_FIELDS: &[&str] = &[
     "Region",
@@ -374,6 +352,24 @@ impl ChannelPopupState {
             },
         ))
     }
+}
+
+/// Steps through a fixed list of options, wrapping at both ends.
+///
+/// Falls back to the first entry when the current value is not in the list.
+fn cycle_through<T: Copy + PartialEq>(options: &[T], current: T, forward: bool) -> T {
+    if options.is_empty() {
+        return current;
+    }
+
+    let index = options.iter().position(|o| *o == current).unwrap_or(0);
+    let len = options.len();
+    let next = if forward {
+        (index + 1) % len
+    } else {
+        (index + len - 1) % len
+    };
+    options[next]
 }
 
 /// Frames a toast is shown for.
@@ -1100,8 +1096,8 @@ pub fn draw_lora_popup(f: &mut Frame, state: &LoRaPopupState, area: ratatui::lay
             let prefix = if is_selected { "► " } else { "  " };
 
             let value = match *field {
-                "Region" => state.region.clone(),
-                "Modem Preset" => state.modem_preset.clone(),
+                "Region" => state.region.to_mesh_string().to_string(),
+                "Modem Preset" => state.modem_preset.to_mesh_string().to_string(),
                 "TX Power" => {
                     if state.tx_power == 0 {
                         "0 (default)".to_string()
@@ -1218,25 +1214,14 @@ pub fn handle_lora_popup_keys(
                 "Cancel" => None,
                 "Region" => {
                     if cycle_forward || cycle_backward {
-                        let idx = LORA_REGIONS
-                            .iter()
-                            .position(|r| r.eq_ignore_ascii_case(&state.region))
-                            .unwrap_or(0);
-                        let len = LORA_REGIONS.len();
-                        let new_idx = ((idx as isize) + dir + len as isize) as usize % len;
-                        state.region = LORA_REGIONS[new_idx].to_string();
+                        state.region = cycle_through(REGION_CODES, state.region, cycle_forward);
                     }
                     None
                 }
                 "Modem Preset" => {
                     if cycle_forward || cycle_backward {
-                        let idx = LORA_MODEM_PRESETS
-                            .iter()
-                            .position(|p| p.eq_ignore_ascii_case(&state.modem_preset))
-                            .unwrap_or(0);
-                        let len = LORA_MODEM_PRESETS.len();
-                        let new_idx = ((idx as isize) + dir + len as isize) as usize % len;
-                        state.modem_preset = LORA_MODEM_PRESETS[new_idx].to_string();
+                        state.modem_preset =
+                            cycle_through(MODEM_PRESETS, state.modem_preset, cycle_forward);
                     }
                     None
                 }
@@ -1875,6 +1860,64 @@ mod tests {
             let _ = std::fs::remove_file(&file);
             assert_eq!(written.trim(), "--clipboard");
         }
+    }
+
+    #[test]
+    fn the_lora_popup_offers_every_region() {
+        let mut popup = LoRaPopupState::new();
+        let mut seen = Vec::new();
+
+        // One full lap through the field.
+        for _ in 0..REGION_CODES.len() {
+            seen.push(popup.region);
+            popup.region = cycle_through(REGION_CODES, popup.region, true);
+        }
+
+        seen.sort_by_key(|region| *region as i32);
+        let mut expected: Vec<_> = REGION_CODES.to_vec();
+        expected.sort_by_key(|region| *region as i32);
+        assert_eq!(seen, expected);
+        // A full lap comes back to where it started.
+        assert_eq!(popup.region, RegionCode::Eu868);
+    }
+
+    #[test]
+    fn the_lora_popup_offers_every_modem_preset() {
+        let mut popup = LoRaPopupState::new();
+        let mut seen = Vec::new();
+
+        for _ in 0..MODEM_PRESETS.len() {
+            seen.push(popup.modem_preset);
+            popup.modem_preset = cycle_through(MODEM_PRESETS, popup.modem_preset, true);
+        }
+
+        seen.sort_by_key(|preset| *preset as i32);
+        let mut expected: Vec<_> = MODEM_PRESETS.to_vec();
+        expected.sort_by_key(|preset| *preset as i32);
+        assert_eq!(seen, expected);
+    }
+
+    #[test]
+    fn a_region_survives_the_popup_round_trip() {
+        // Editing the LoRa config used to run the region through its name, so
+        // a region the TUI did not list came back as EU868.
+        for region in REGION_CODES {
+            let mut lora = LoRaPopupState::new().to_lora_info();
+            lora.region = *region;
+
+            let reopened = LoRaPopupState::from_lora(&lora).to_lora_info();
+
+            assert_eq!(reopened.region, *region);
+        }
+    }
+
+    #[test]
+    fn cycling_wraps_at_both_ends() {
+        let first = REGION_CODES[0];
+        let last = REGION_CODES[REGION_CODES.len() - 1];
+
+        assert_eq!(cycle_through(REGION_CODES, last, true), first);
+        assert_eq!(cycle_through(REGION_CODES, first, false), last);
     }
 
     #[test]

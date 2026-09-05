@@ -3,8 +3,8 @@ mod tui;
 
 use clap::{Parser, ValueEnum};
 use meshurl::{
-    ChannelInfo, ChannelRole, LoRaInfo, MeshtasticConfig, decode_url, encoder, errors::EncodeError,
-    get_preset_params,
+    ChannelInfo, ChannelRole, LoRaInfo, MeshtasticConfig, ModemPreset, RegionCode, decode_url,
+    encoder, errors::EncodeError, get_preset_params,
 };
 
 #[derive(Parser, Debug)]
@@ -107,26 +107,42 @@ enum Region {
     Lora24,
     Ua433,
     Ua868,
+    My433,
+    My919,
+    Sg923,
+    Ph433,
+    Ph868,
+    Ph915,
+    Anz433,
 }
 
-impl Region {
-    fn to_value(self) -> &'static str {
-        match self {
-            Region::Us => "US",
-            Region::Eu433 => "EU433",
-            Region::Eu868 => "EU868",
-            Region::Cn => "CN",
-            Region::Jp => "JP",
-            Region::Anz => "ANZ",
-            Region::Kr => "KR",
-            Region::Tw => "TW",
-            Region::Ru => "RU",
-            Region::In => "IN",
-            Region::Nz865 => "NZ865",
-            Region::Th => "TH",
-            Region::Lora24 => "Lora24",
-            Region::Ua433 => "UA433",
-            Region::Ua868 => "UA868",
+impl From<Region> for RegionCode {
+    /// Maps the command line choice onto the protobuf enum directly, rather
+    /// than through a name that a typo would silently turn into EU868.
+    fn from(region: Region) -> Self {
+        match region {
+            Region::Us => RegionCode::Us,
+            Region::Eu433 => RegionCode::Eu433,
+            Region::Eu868 => RegionCode::Eu868,
+            Region::Cn => RegionCode::Cn,
+            Region::Jp => RegionCode::Jp,
+            Region::Anz => RegionCode::Anz,
+            Region::Kr => RegionCode::Kr,
+            Region::Tw => RegionCode::Tw,
+            Region::Ru => RegionCode::Ru,
+            Region::In => RegionCode::In,
+            Region::Nz865 => RegionCode::Nz865,
+            Region::Th => RegionCode::Th,
+            Region::Lora24 => RegionCode::Lora24,
+            Region::Ua433 => RegionCode::Ua433,
+            Region::Ua868 => RegionCode::Ua868,
+            Region::My433 => RegionCode::My433,
+            Region::My919 => RegionCode::My919,
+            Region::Sg923 => RegionCode::Sg923,
+            Region::Ph433 => RegionCode::Ph433,
+            Region::Ph868 => RegionCode::Ph868,
+            Region::Ph915 => RegionCode::Ph915,
+            Region::Anz433 => RegionCode::Anz433,
         }
     }
 }
@@ -144,18 +160,18 @@ enum ModemPresetArg {
     ShortTurbo,
 }
 
-impl ModemPresetArg {
-    fn to_value(self) -> &'static str {
-        match self {
-            ModemPresetArg::LongFast => "LongFast",
-            ModemPresetArg::LongSlow => "LongSlow",
-            ModemPresetArg::VeryLongSlow => "VeryLongSlow",
-            ModemPresetArg::MediumSlow => "MediumSlow",
-            ModemPresetArg::MediumFast => "MediumFast",
-            ModemPresetArg::ShortSlow => "ShortSlow",
-            ModemPresetArg::ShortFast => "ShortFast",
-            ModemPresetArg::LongModerate => "LongModerate",
-            ModemPresetArg::ShortTurbo => "ShortTurbo",
+impl From<ModemPresetArg> for ModemPreset {
+    fn from(preset: ModemPresetArg) -> Self {
+        match preset {
+            ModemPresetArg::LongFast => ModemPreset::LongFast,
+            ModemPresetArg::LongSlow => ModemPreset::LongSlow,
+            ModemPresetArg::VeryLongSlow => ModemPreset::VeryLongSlow,
+            ModemPresetArg::MediumSlow => ModemPreset::MediumSlow,
+            ModemPresetArg::MediumFast => ModemPreset::MediumFast,
+            ModemPresetArg::ShortSlow => ModemPreset::ShortSlow,
+            ModemPresetArg::ShortFast => ModemPreset::ShortFast,
+            ModemPresetArg::LongModerate => ModemPreset::LongModerate,
+            ModemPresetArg::ShortTurbo => ModemPreset::ShortTurbo,
         }
     }
 }
@@ -238,12 +254,8 @@ fn encode_config(args: &EncodeArgs) -> Result<(MeshtasticConfig, String, String)
 }
 
 fn create_lora_config(args: &LoRaArgs) -> LoRaInfo {
-    use meshurl::{ModemPreset, RegionCode, modem_preset_from_str, region_code_from_str};
-
     let has_preset = args.region.is_some() || args.modem_preset.is_some();
-    let modem_preset = args
-        .modem_preset
-        .map(|m| modem_preset_from_str(m.to_value()));
+    let modem_preset = args.modem_preset.map(ModemPreset::from);
 
     let (bandwidth, spread_factor, coding_rate) = if has_preset {
         let preset = modem_preset.unwrap_or(ModemPreset::LongFast);
@@ -253,10 +265,7 @@ fn create_lora_config(args: &LoRaArgs) -> LoRaInfo {
     };
 
     LoRaInfo {
-        region: args
-            .region
-            .map(|r| region_code_from_str(r.to_value()))
-            .unwrap_or(RegionCode::Eu868),
+        region: args.region.map_or(RegionCode::Eu868, RegionCode::from),
         modem_preset: modem_preset.unwrap_or(ModemPreset::LongFast),
         use_preset: has_preset,
         tx_enabled: true,

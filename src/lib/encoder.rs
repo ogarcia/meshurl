@@ -6,7 +6,9 @@ use meshtastic_protobufs::meshtastic::ChannelSet;
 use prost::Message;
 
 use crate::errors::EncodeError;
-use crate::models::{MESHTASTIC_CHANNEL_URL_BASE, MeshtasticConfig};
+use crate::models::{
+    MESHTASTIC_CHANNEL_URL_BASE, MODEM_PRESETS, MeshtasticConfig, MeshtasticDisplay, REGION_CODES,
+};
 
 /// Encodes a MeshtasticConfig into a full URL.
 ///
@@ -40,42 +42,26 @@ pub fn encode_url_short(config: &MeshtasticConfig) -> Result<String, EncodeError
 
 pub use meshtastic_protobufs::meshtastic::config::lo_ra_config::{ModemPreset, RegionCode};
 
-/// Converts a string region name to RegionCode.
-pub fn region_code_from_str(s: &str) -> RegionCode {
-    match s {
-        "US" => RegionCode::Us,
-        "EU433" => RegionCode::Eu433,
-        "EU868" => RegionCode::Eu868,
-        "CN" => RegionCode::Cn,
-        "JP" => RegionCode::Jp,
-        "ANZ" => RegionCode::Anz,
-        "KR" => RegionCode::Kr,
-        "TW" => RegionCode::Tw,
-        "RU" => RegionCode::Ru,
-        "IN" => RegionCode::In,
-        "NZ865" => RegionCode::Nz865,
-        "TH" => RegionCode::Th,
-        "Lora24" => RegionCode::Lora24,
-        "UA433" => RegionCode::Ua433,
-        "UA868" => RegionCode::Ua868,
-        _ => RegionCode::Eu868,
-    }
+/// Looks up a region by name, case-insensitively.
+///
+/// Returns `None` for an unknown name. Falling back to a default instead, as
+/// this used to, silently rewrote the region of a round-tripped URL: a
+/// Philippine channel came back out as EU868.
+pub fn region_code_from_str(s: &str) -> Option<RegionCode> {
+    REGION_CODES
+        .iter()
+        .find(|region| region.to_mesh_string().eq_ignore_ascii_case(s))
+        .copied()
 }
 
-/// Converts a string modem preset name to ModemPreset.
-pub fn modem_preset_from_str(s: &str) -> ModemPreset {
-    match s {
-        "LongFast" => ModemPreset::LongFast,
-        "LongSlow" => ModemPreset::LongSlow,
-        "VeryLongSlow" => ModemPreset::VeryLongSlow,
-        "MediumSlow" => ModemPreset::MediumSlow,
-        "MediumFast" => ModemPreset::MediumFast,
-        "ShortSlow" => ModemPreset::ShortSlow,
-        "ShortFast" => ModemPreset::ShortFast,
-        "LongModerate" => ModemPreset::LongModerate,
-        "ShortTurbo" => ModemPreset::ShortTurbo,
-        _ => ModemPreset::LongFast,
-    }
+/// Looks up a modem preset by name, case-insensitively.
+///
+/// Returns `None` for an unknown name.
+pub fn modem_preset_from_str(s: &str) -> Option<ModemPreset> {
+    MODEM_PRESETS
+        .iter()
+        .find(|preset| preset.to_mesh_string().eq_ignore_ascii_case(s))
+        .copied()
 }
 
 /// Creates a protobuf ChannelSet from a MeshtasticConfig.
@@ -210,25 +196,76 @@ mod tests {
     fn test_region_code_from_str() {
         use meshtastic_protobufs::meshtastic::config::lo_ra_config::RegionCode;
 
-        assert_eq!(region_code_from_str("US"), RegionCode::Us);
-        assert_eq!(region_code_from_str("EU868"), RegionCode::Eu868);
-        assert_eq!(region_code_from_str("CN"), RegionCode::Cn);
-        assert_eq!(region_code_from_str("JP"), RegionCode::Jp);
-        assert_eq!(region_code_from_str("unknown"), RegionCode::Eu868);
+        assert_eq!(region_code_from_str("US"), Some(RegionCode::Us));
+        assert_eq!(region_code_from_str("EU868"), Some(RegionCode::Eu868));
+        assert_eq!(region_code_from_str("CN"), Some(RegionCode::Cn));
+        assert_eq!(region_code_from_str("JP"), Some(RegionCode::Jp));
+        // Regions the CLI and TUI used to be missing.
+        assert_eq!(region_code_from_str("PH915"), Some(RegionCode::Ph915));
+        assert_eq!(region_code_from_str("MY433"), Some(RegionCode::My433));
+        assert_eq!(region_code_from_str("ANZ433"), Some(RegionCode::Anz433));
+        // An unknown name is rejected, not quietly turned into EU868.
+        assert_eq!(region_code_from_str("unknown"), None);
+        assert_eq!(region_code_from_str(""), None);
+    }
+
+    #[test]
+    fn test_region_code_from_str_is_case_insensitive() {
+        use meshtastic_protobufs::meshtastic::config::lo_ra_config::RegionCode;
+
+        assert_eq!(region_code_from_str("eu868"), Some(RegionCode::Eu868));
+        assert_eq!(region_code_from_str("lora24"), Some(RegionCode::Lora24));
+    }
+
+    #[test]
+    fn test_every_region_survives_a_name_round_trip() {
+        use crate::models::{MeshtasticDisplay, REGION_CODES};
+
+        for region in REGION_CODES {
+            assert_eq!(
+                region_code_from_str(region.to_mesh_string()),
+                Some(*region),
+                "{} does not round-trip",
+                region.to_mesh_string()
+            );
+        }
     }
 
     #[test]
     fn test_modem_preset_from_str() {
         use meshtastic_protobufs::meshtastic::config::lo_ra_config::ModemPreset;
 
-        assert_eq!(modem_preset_from_str("LongFast"), ModemPreset::LongFast);
-        assert_eq!(modem_preset_from_str("LongSlow"), ModemPreset::LongSlow);
+        assert_eq!(
+            modem_preset_from_str("LongFast"),
+            Some(ModemPreset::LongFast)
+        );
+        assert_eq!(
+            modem_preset_from_str("LongSlow"),
+            Some(ModemPreset::LongSlow)
+        );
         assert_eq!(
             modem_preset_from_str("VeryLongSlow"),
-            ModemPreset::VeryLongSlow
+            Some(ModemPreset::VeryLongSlow)
         );
-        assert_eq!(modem_preset_from_str("ShortTurbo"), ModemPreset::ShortTurbo);
-        assert_eq!(modem_preset_from_str("unknown"), ModemPreset::LongFast);
+        assert_eq!(
+            modem_preset_from_str("ShortTurbo"),
+            Some(ModemPreset::ShortTurbo)
+        );
+        assert_eq!(modem_preset_from_str("unknown"), None);
+    }
+
+    #[test]
+    fn test_every_modem_preset_survives_a_name_round_trip() {
+        use crate::models::{MODEM_PRESETS, MeshtasticDisplay};
+
+        for preset in MODEM_PRESETS {
+            assert_eq!(
+                modem_preset_from_str(preset.to_mesh_string()),
+                Some(*preset),
+                "{} does not round-trip",
+                preset.to_mesh_string()
+            );
+        }
     }
 
     #[test]
