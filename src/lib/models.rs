@@ -324,6 +324,17 @@ impl std::fmt::Display for PskMode {
     }
 }
 
+/// Hashes a passphrase into a PSK, refusing an empty one.
+///
+/// Hashing the empty string yields a fixed, publicly known value, so accepting
+/// it would silently produce a channel anyone can decrypt.
+fn hash_passphrase(phrase: &str) -> Result<String, String> {
+    if phrase.is_empty() {
+        return Err("Passphrase cannot be empty".to_string());
+    }
+    Ok(hash_phrase_to_psk(phrase))
+}
+
 /// Validates and normalizes a base64-encoded PSK.
 /// Returns the PSK if valid (16 or 32 bytes), or an error otherwise.
 fn validate_and_normalize_psk(psk: &str) -> Result<String, String> {
@@ -419,12 +430,15 @@ impl std::str::FromStr for ChannelInfo {
                         Some("default") | Some("d") => Some(PskMode::Default),
                         Some("none") | Some("n") => Some(PskMode::None),
                         Some("random") | Some("r") => Some(PskMode::Random),
-                        Some(v) if v.starts_with("base64:") => {
-                            Some(PskMode::Base64(v[7..].to_string()))
-                        }
-                        Some(v) if v.starts_with("passphrase:") => {
-                            Some(PskMode::Passphrase(v[12..].to_string()))
-                        }
+                        // strip_prefix rather than a byte offset: the hand
+                        // counted offsets were wrong for "passphrase:" and
+                        // panicked on a value that was only the prefix.
+                        Some(v) if v.starts_with("base64:") => v
+                            .strip_prefix("base64:")
+                            .map(|psk| PskMode::Base64(psk.to_string())),
+                        Some(v) if v.starts_with("passphrase:") => v
+                            .strip_prefix("passphrase:")
+                            .map(|phrase| PskMode::Passphrase(phrase.to_string())),
                         _ => None,
                     }
                 }
@@ -450,14 +464,14 @@ impl std::str::FromStr for ChannelInfo {
             let final_psk = if let Some(p) = psk {
                 validate_and_normalize_psk(&p)?
             } else if let Some(phrase) = psk_phrase {
-                hash_phrase_to_psk(&phrase)
+                hash_passphrase(&phrase)?
             } else {
                 match psk_mode.unwrap_or(PskMode::Default) {
                     PskMode::Default => DEFAULT_PSK.to_string(),
                     PskMode::None => String::new(),
                     PskMode::Random => generate_random_psk(),
                     PskMode::Base64(psk_str) => validate_and_normalize_psk(&psk_str)?,
-                    PskMode::Passphrase(phrase) => hash_phrase_to_psk(&phrase),
+                    PskMode::Passphrase(phrase) => hash_passphrase(&phrase)?,
                 }
             };
             (final_name, final_psk)
@@ -829,7 +843,45 @@ mod tests {
     fn test_channel_info_psk_mode_passphrase() {
         let channel: ChannelInfo = "psk_mode=passphrase:my secret phrase".parse().unwrap();
         assert_eq!(channel.psk_type, PskType::Aes256);
-        assert_eq!(channel.psk.len(), 44);
+        // Checking only the length hid an off-by-one that hashed the phrase
+        // without its first character.
+        assert_eq!(channel.psk, hash_phrase_to_psk("my secret phrase"));
+    }
+
+    #[test]
+    fn test_channel_info_psk_passphrase_option() {
+        let channel: ChannelInfo = "psk_passphrase=my secret phrase".parse().unwrap();
+        assert_eq!(channel.psk, hash_phrase_to_psk("my secret phrase"));
+    }
+
+    #[test]
+    fn test_channel_info_psk_mode_passphrase_single_char() {
+        let channel: ChannelInfo = "psk_mode=passphrase:x".parse().unwrap();
+        assert_eq!(channel.psk, hash_phrase_to_psk("x"));
+    }
+
+    #[test]
+    fn test_channel_info_psk_mode_passphrase_multibyte() {
+        let channel: ChannelInfo = "psk_mode=passphrase:\u{e1}rbore".parse().unwrap();
+        assert_eq!(channel.psk, hash_phrase_to_psk("\u{e1}rbore"));
+    }
+
+    #[test]
+    fn test_channel_info_psk_mode_passphrase_empty_is_refused() {
+        // Used to panic slicing past the end of the string; hashing the empty
+        // phrase would hand out a publicly known key.
+        let result: Result<ChannelInfo, _> = "psk_mode=passphrase:".parse();
+        assert_eq!(result.unwrap_err(), "Passphrase cannot be empty");
+
+        let result: Result<ChannelInfo, _> = "psk_passphrase=".parse();
+        assert_eq!(result.unwrap_err(), "Passphrase cannot be empty");
+    }
+
+    #[test]
+    fn test_channel_info_psk_mode_base64_keeps_full_value() {
+        let psk = "CcZBoFJbADPGEoSkkYPA3Ha23rr7WPcyUo1AjorGQIA=";
+        let channel: ChannelInfo = format!("psk_mode=base64:{}", psk).parse().unwrap();
+        assert_eq!(channel.psk, psk);
     }
 
     #[test]
