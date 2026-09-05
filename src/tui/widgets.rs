@@ -1,6 +1,8 @@
 use meshurl::models::{
     ChannelInfo, ChannelRole, LoRaInfo, MeshtasticDisplay, POSITION_OPTIONS, PskType,
 };
+use std::time::{Duration, Instant};
+
 use ratatui::{
     Frame,
     layout::Rect,
@@ -9,11 +11,35 @@ use ratatui::{
     widgets::{Block, Borders, Clear, ListItem, Padding, Paragraph},
 };
 
+/// How long a toast stays on screen.
+pub const TOAST_DURATION: Duration = Duration::from_secs(2);
+
 #[derive(Clone)]
 pub struct ToastMessage {
     pub text: String,
     pub is_success: bool,
     pub is_uncertain: bool,
+    /// When the toast stops being shown.
+    ///
+    /// Counting down draw calls instead, as this used to, tied the lifetime of
+    /// the message to the redraw rate: the same toast lasted two seconds at 60
+    /// frames per second and minutes at one frame per keystroke.
+    pub expires_at: Instant,
+}
+
+impl ToastMessage {
+    pub fn new(text: impl Into<String>, is_success: bool, is_uncertain: bool) -> Self {
+        Self {
+            text: text.into(),
+            is_success,
+            is_uncertain,
+            expires_at: Instant::now() + TOAST_DURATION,
+        }
+    }
+
+    pub fn has_expired(&self) -> bool {
+        Instant::now() >= self.expires_at
+    }
 }
 
 /// Horizontal space the toast borders and padding take from its text.
@@ -476,11 +502,7 @@ mod tests {
     use ratatui::{Terminal, backend::TestBackend};
 
     fn toast(text: &str) -> ToastMessage {
-        ToastMessage {
-            text: text.to_string(),
-            is_success: true,
-            is_uncertain: false,
-        }
+        ToastMessage::new(text, true, false)
     }
 
     fn draw_toast(width: u16, height: u16, text: &str) {
@@ -493,6 +515,24 @@ mod tests {
 
     /// The longest message the TUI can raise, on a screen too small for it.
     const LONG_TOAST: &str = "Seems copied (if not work install wl-clipboard or xclip)";
+
+    #[test]
+    fn a_toast_expires_after_its_duration() {
+        let toast = toast("Copied to clipboard!");
+
+        assert!(!toast.has_expired());
+        assert!(toast.expires_at > Instant::now());
+        assert!(toast.expires_at <= Instant::now() + TOAST_DURATION);
+    }
+
+    #[test]
+    fn an_elapsed_toast_reports_itself_expired() {
+        let mut toast = toast("Copied to clipboard!");
+        // A lifetime measured in time, not in draw calls.
+        toast.expires_at = Instant::now() - Duration::from_millis(1);
+
+        assert!(toast.has_expired());
+    }
 
     #[test]
     fn renders_on_a_narrow_screen() {

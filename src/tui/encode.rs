@@ -16,7 +16,7 @@ use ratatui_textarea::{CursorMove, TextArea};
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-use crate::tui::app::{ActivePanel, EncodeDrawState, EncodeState};
+use crate::tui::app::{ActivePanel, EncodeDrawState, EncodeState, ToastMessage};
 use crate::tui::widgets::{
     centered_popup, channel_list_item, channel_scroll_indicator, channel_total_lines,
     lora_info_lines, lora_scroll_info, truncate_to_columns,
@@ -449,22 +449,9 @@ fn cycle_through<T: Copy + PartialEq>(options: &[T], current: T, forward: bool) 
     options[next]
 }
 
-/// Frames a toast is shown for.
-const TOAST_FRAMES: u8 = 120;
-
 /// Raises a toast, replacing whatever was on screen.
-fn show_toast(
-    toast: &mut Option<crate::tui::app::ToastMessage>,
-    toast_timer: &mut u8,
-    text: &str,
-    is_success: bool,
-) {
-    *toast = Some(crate::tui::app::ToastMessage {
-        text: text.to_string(),
-        is_success,
-        is_uncertain: false,
-    });
-    *toast_timer = TOAST_FRAMES;
+fn show_toast(toast: &mut Option<ToastMessage>, text: &str, is_success: bool) {
+    *toast = Some(ToastMessage::new(text, is_success, false));
 }
 
 /// Decodes a base64 PSK, checking it is a usable AES key length.
@@ -812,7 +799,7 @@ pub fn handle_encode_keys(
             return true;
         }
 
-        let result = handle_popup_keys(key, popup, state.toast, state.toast_timer);
+        let result = handle_popup_keys(key, popup, state.toast);
 
         match result {
             Some((idx, mut channel)) => {
@@ -860,18 +847,14 @@ pub fn handle_encode_keys(
                 let result = copy_to_clipboard(&url);
                 let is_ok = result.is_ok();
                 let is_uncertain = matches!(result, Ok(CopyMethod::Osc52));
-                *state.toast = Some(crate::tui::app::ToastMessage {
-                    text: match result {
-                        Ok(CopyMethod::Tool) => "Copied to clipboard!".to_string(),
-                        Ok(CopyMethod::Osc52) => {
-                            "Seems copied (if not work install wl-clipboard or xclip)".to_string()
-                        }
-                        Err(e) => e,
-                    },
-                    is_success: is_ok,
-                    is_uncertain,
-                });
-                *state.toast_timer = TOAST_FRAMES;
+                let text = match result {
+                    Ok(CopyMethod::Tool) => "Copied to clipboard!".to_string(),
+                    Ok(CopyMethod::Osc52) => {
+                        "Seems copied (if not work install wl-clipboard or xclip)".to_string()
+                    }
+                    Err(e) => e,
+                };
+                *state.toast = Some(ToastMessage::new(text, is_ok, is_uncertain));
             }
             true
         }
@@ -1470,8 +1453,7 @@ pub fn handle_lora_popup_keys(
 pub fn handle_popup_keys(
     key: ratatui::crossterm::event::KeyEvent,
     state: &mut ChannelPopupState,
-    toast: &mut Option<crate::tui::app::ToastMessage>,
-    toast_timer: &mut u8,
+    toast: &mut Option<ToastMessage>,
 ) -> Option<(usize, ChannelInfo)> {
     use ratatui::crossterm::event::KeyCode;
 
@@ -1486,7 +1468,7 @@ pub fn handle_popup_keys(
             // Report the overlong name while the field is still open, rather
             // than letting it fail later on save.
             if let Err(message) = validate_channel_name(&entered) {
-                show_toast(toast, toast_timer, &message, false);
+                show_toast(toast, &message, false);
                 return None;
             }
 
@@ -1511,7 +1493,7 @@ pub fn handle_popup_keys(
                 && !entered.trim().is_empty()
                 && let Err(message) = decode_base64_psk(entered.trim())
             {
-                show_toast(toast, toast_timer, &message, false);
+                show_toast(toast, &message, false);
                 return None;
             }
 
@@ -1560,7 +1542,7 @@ pub fn handle_popup_keys(
                         match state.to_channel_info(0) {
                             Ok(channel) => return Some(channel),
                             // Keep the popup open so the key material is not lost.
-                            Err(message) => show_toast(toast, toast_timer, &message, false),
+                            Err(message) => show_toast(toast, &message, false),
                         }
                     }
                     None
@@ -1628,7 +1610,6 @@ mod tests {
         let mut lora_scroll = 0;
         let mut lora_max_scroll = 0;
         let mut toast = None;
-        let mut toast_timer = 0;
 
         let mut state = EncodeState {
             encode_config: config,
@@ -1640,7 +1621,6 @@ mod tests {
             lora_scroll: &mut lora_scroll,
             lora_max_scroll: &mut lora_max_scroll,
             toast: &mut toast,
-            toast_timer: &mut toast_timer,
         };
 
         handle_encode_keys(KeyEvent::from(code), &mut state);
@@ -1661,17 +1641,11 @@ mod tests {
     fn popup_with_psk(mode: PskModeKind, value: &str) -> ChannelPopupState {
         let mut popup = ChannelPopupState::new();
         let mut toast = None;
-        let mut toast_timer = 0;
 
         // Move onto the "PSK Mode" field and cycle until the mode is selected.
         popup.selected_field = 1;
         while popup.psk_mode != mode {
-            handle_popup_keys(
-                KeyEvent::from(KeyCode::Right),
-                &mut popup,
-                &mut toast,
-                &mut toast_timer,
-            );
+            handle_popup_keys(KeyEvent::from(KeyCode::Right), &mut popup, &mut toast);
         }
 
         if mode.needs_value() {
@@ -1682,19 +1656,9 @@ mod tests {
                 .expect("modes needing a value expose a PSK field");
 
             // Enter opens the input overlay, the textarea takes the text, Enter commits.
-            handle_popup_keys(
-                KeyEvent::from(KeyCode::Enter),
-                &mut popup,
-                &mut toast,
-                &mut toast_timer,
-            );
+            handle_popup_keys(KeyEvent::from(KeyCode::Enter), &mut popup, &mut toast);
             popup.psk_textarea = TextArea::new(vec![value.to_string()]);
-            handle_popup_keys(
-                KeyEvent::from(KeyCode::Enter),
-                &mut popup,
-                &mut toast,
-                &mut toast_timer,
-            );
+            handle_popup_keys(KeyEvent::from(KeyCode::Enter), &mut popup, &mut toast);
         }
 
         popup
@@ -1761,19 +1725,13 @@ mod tests {
     fn a_rejected_psk_raises_a_toast_and_keeps_the_popup_open() {
         let mut popup = popup_with_psk(PskModeKind::Base64, "");
         let mut toast = None;
-        let mut toast_timer = 0;
 
         let fields = get_popup_fields(popup.psk_mode);
         popup.selected_field = fields
             .iter()
             .position(|field| *field == "Save")
             .expect("Save is always offered");
-        let saved = handle_popup_keys(
-            KeyEvent::from(KeyCode::Enter),
-            &mut popup,
-            &mut toast,
-            &mut toast_timer,
-        );
+        let saved = handle_popup_keys(KeyEvent::from(KeyCode::Enter), &mut popup, &mut toast);
 
         assert!(saved.is_none());
         let toast = toast.expect("the failure is reported");
@@ -1814,14 +1772,8 @@ mod tests {
         assert_eq!(popup.psk_value, VALID_PSK);
 
         let mut toast = None;
-        let mut toast_timer = 0;
         popup.selected_field = 1;
-        handle_popup_keys(
-            KeyEvent::from(KeyCode::Right),
-            &mut popup,
-            &mut toast,
-            &mut toast_timer,
-        );
+        handle_popup_keys(KeyEvent::from(KeyCode::Right), &mut popup, &mut toast);
 
         assert_eq!(popup.psk_mode, PskModeKind::Passphrase);
         assert!(popup.psk_value.is_empty());
@@ -1843,24 +1795,13 @@ mod tests {
     fn an_overlong_name_is_reported_while_editing() {
         let mut popup = ChannelPopupState::new();
         let mut toast = None;
-        let mut toast_timer = 0;
 
         popup.selected_field = 0;
-        handle_popup_keys(
-            KeyEvent::from(KeyCode::Enter),
-            &mut popup,
-            &mut toast,
-            &mut toast_timer,
-        );
+        handle_popup_keys(KeyEvent::from(KeyCode::Enter), &mut popup, &mut toast);
         assert!(popup.editing_name);
 
         popup.name_textarea = TextArea::new(vec!["EsteNombreEsDemasiadoLargo".to_string()]);
-        handle_popup_keys(
-            KeyEvent::from(KeyCode::Enter),
-            &mut popup,
-            &mut toast,
-            &mut toast_timer,
-        );
+        handle_popup_keys(KeyEvent::from(KeyCode::Enter), &mut popup, &mut toast);
 
         // The field stays open and the name is not taken.
         assert!(popup.editing_name);
@@ -1877,22 +1818,11 @@ mod tests {
     fn a_name_within_the_limit_is_taken() {
         let mut popup = ChannelPopupState::new();
         let mut toast = None;
-        let mut toast_timer = 0;
 
         popup.selected_field = 0;
-        handle_popup_keys(
-            KeyEvent::from(KeyCode::Enter),
-            &mut popup,
-            &mut toast,
-            &mut toast_timer,
-        );
+        handle_popup_keys(KeyEvent::from(KeyCode::Enter), &mut popup, &mut toast);
         popup.name_textarea = TextArea::new(vec!["Galicia".to_string()]);
-        handle_popup_keys(
-            KeyEvent::from(KeyCode::Enter),
-            &mut popup,
-            &mut toast,
-            &mut toast_timer,
-        );
+        handle_popup_keys(KeyEvent::from(KeyCode::Enter), &mut popup, &mut toast);
 
         assert!(!popup.editing_name);
         assert_eq!(popup.name, "Galicia");

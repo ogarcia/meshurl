@@ -8,6 +8,13 @@ use ratatui::crossterm::{
 use ratatui::{Frame, Terminal, backend::CrosstermBackend, widgets::ListState};
 use ratatui_textarea::TextArea;
 use std::io;
+use std::time::{Duration, Instant};
+
+/// How long to wait for an event when nothing is pending.
+///
+/// Only affects how promptly the loop notices an external change; user input
+/// wakes the poll immediately.
+const IDLE_POLL: Duration = Duration::from_secs(1);
 
 pub use crate::tui::widgets::{ToastMessage, render_toast};
 
@@ -41,7 +48,6 @@ pub struct AppState {
     pub channel_popup: Option<crate::tui::encode::ChannelPopupState>,
     pub lora_popup: Option<crate::tui::encode::LoRaPopupState>,
     pub toast: Option<ToastMessage>,
-    pub toast_timer: u8,
 }
 
 pub struct DecodeState<'a> {
@@ -65,7 +71,6 @@ pub struct EncodeState<'a> {
     pub lora_scroll: &'a mut u16,
     pub lora_max_scroll: &'a mut u16,
     pub toast: &'a mut Option<ToastMessage>,
-    pub toast_timer: &'a mut u8,
 }
 
 pub struct DecodeDrawState<'a> {
@@ -107,7 +112,6 @@ impl Default for AppState {
             channel_popup: None,
             lora_popup: None,
             toast: None,
-            toast_timer: 0,
         }
     }
 }
@@ -159,20 +163,31 @@ fn run_inner(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     state: &mut AppState,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let mut needs_redraw = true;
+
     loop {
-        terminal.draw(|f| {
-            draw(f, state);
-        })?;
-
-        if state.toast_timer > 0 {
-            state.toast_timer -= 1;
-        }
-        if state.toast_timer == 0 {
-            state.toast = None;
+        if needs_redraw {
+            terminal.draw(|f| {
+                draw(f, state);
+            })?;
+            needs_redraw = false;
         }
 
-        if event::poll(std::time::Duration::from_millis(16))? {
-            let Event::Key(key) = event::read()? else {
+        // Wake up in time to clear the toast, and otherwise only when something
+        // happens. Redrawing on a fixed 60 Hz tick, as this used to, kept the
+        // process busy for a screen that changes only on a keystroke.
+        let timeout = state
+            .toast
+            .as_ref()
+            .map(|toast| toast.expires_at.saturating_duration_since(Instant::now()))
+            .unwrap_or(IDLE_POLL);
+
+        if event::poll(timeout)? {
+            let event = event::read()?;
+            // Anything that reaches us changes the screen, a resize included.
+            needs_redraw = true;
+
+            let Event::Key(key) = event else {
                 continue;
             };
             if key.kind == KeyEventKind::Press {
@@ -287,7 +302,6 @@ fn run_inner(
                                             lora_scroll: &mut state.lora_scroll,
                                             lora_max_scroll: &mut state.lora_max_scroll,
                                             toast: &mut state.toast,
-                                            toast_timer: &mut state.toast_timer,
                                         };
                                         crate::tui::encode::handle_encode_keys(
                                             key,
@@ -315,6 +329,11 @@ fn run_inner(
                     }
                 }
             }
+        }
+
+        if state.toast.as_ref().is_some_and(ToastMessage::has_expired) {
+            state.toast = None;
+            needs_redraw = true;
         }
     }
 }
