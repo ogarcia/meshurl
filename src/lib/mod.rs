@@ -28,6 +28,7 @@ pub mod decoder;
 pub mod encoder;
 pub mod errors;
 pub mod models;
+pub mod protobufs;
 
 pub use decoder::{DecodeResult, decode_url};
 pub use encoder::{

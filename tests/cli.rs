@@ -60,7 +60,7 @@ fn prints_the_lora_configuration() {
 
     assert!(out.contains("LoRa Configuration"));
     assert!(out.contains("Region:"));
-    assert!(out.contains("Modem Preset: LongFast"));
+    assert!(out.contains("Modem Preset: LONG_FAST"));
     assert!(out.contains("Bandwidth: 250 kHz"));
     assert!(out.contains("Coding Rate: 4/5"));
 }
@@ -126,7 +126,7 @@ fn a_generated_url_decodes_back() {
     let decoded = stdout_of(&["decode", &url]);
 
     assert!(decoded.contains("Galicia"));
-    assert!(decoded.contains("Region: EU868"));
+    assert!(decoded.contains("Region: EU_868"));
     assert!(decoded.contains("Position Precision: 14"));
 }
 

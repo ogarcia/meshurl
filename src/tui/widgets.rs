@@ -284,7 +284,7 @@ pub fn lora_info_lines(lora: &LoRaInfo) -> Vec<Line<'_>> {
     let enabled_color = Color::Green;
     let disabled_color = Color::Red;
 
-    let (bandwidth, spread_factor, coding_rate) = lora.modem.parameters();
+    let (bandwidth, spread_factor, coding_rate) = lora.modem_parameters();
 
     let all_lines = vec![
         Line::from(vec![

@@ -28,11 +28,18 @@ the fidelity of what is encoded and displayed.
 
 ### Added
 
+- Support for the regions and modem presets introduced by firmware 2.8: 15 new
+  regions (Kazakhstan, Nepal, Brazil, the ITU amateur bands, EU 866/874/917 and
+  EU narrow 868) and 8 new presets (LongTurbo, MediumTurbo, Lite, Narrow and
+  Tiny). A URL using any of them used to decode as `UNSET` or `LONG_FAST` and
+  lose the value on the way back out.
+- The 2.4 GHz band (`LORA_24`) now gets the wider bandwidths the firmware uses
+  there, instead of the narrow band figures.
 - The TUI decodes node (`/v/`) URLs, which it used to refuse.
 - The LoRa popup exposes bandwidth, spreading factor and coding rate for manual
   configurations, and offers `Custom` alongside the presets.
-- Seven regions that the decoder understood but neither interface offered:
-  `MY433`, `MY919`, `SG923`, `PH433`, `PH868`, `PH915` and `ANZ433`.
+- Seven regions the decoder understood but neither interface offered:
+  `MY_433`, `MY_919`, `SG_923`, `PH_433`, `PH_868`, `PH_915` and `ANZ_433`.
 - `q` and `Ctrl+C` quit the TUI; `Esc` still works.
 - The coding rate is shown in the TUI LoRa panel, matching the CLI.
 - `--version`, and `\,` to put a literal comma in a channel name or passphrase.
@@ -55,9 +62,22 @@ the fidelity of what is encoded and displayed.
 - Library API: `LoRaInfo` replaces its five modem fields with a `ModemConfig`
   enum, `generate_random_psk` returns a `Result`, and `region_code_from_str`
   and `modem_preset_from_str` return an `Option` instead of a silent default.
+- **Regions and presets are now named as the protobuf names them**: `EU_868`
+  rather than `EU868`, `LONG_FAST` rather than `LongFast`. The names come from
+  the definitions, so they can no longer fall behind the firmware.
+- The protobuf types are generated at build time from the definitions vendored
+  in `proto/`, taken from upstream v2.8.0, instead of the `meshtastic_protobufs`
+  crate, whose latest release predates firmware 2.8. Building needs no `protoc`:
+  the definitions are compiled with protox.
+- `VERY_LONG_SLOW` is no longer offered. The firmware deprecated it in 2.5 and
+  treats it as an illegal value.
 
 ### Fixed
 
+- Four modem presets carried the wrong radio parameters. Against the firmware
+  table, `LONG_SLOW` is 125 kHz / SF12 / 4:8 (was 250 / 12 / 4:5), `MEDIUM_SLOW`
+  is 250 kHz (was 125), `SHORT_SLOW` is 250 kHz (was 125) and `LONG_MODERATE` is
+  125 kHz / SF11 / 4:8 (was 250 / 10 / 4:5).
 - A panic inside the TUI left the terminal in raw mode on the alternate screen,
   hiding both the panic message and the shell.
 - Five reachable panics: reordering an empty channel list, an unbounded

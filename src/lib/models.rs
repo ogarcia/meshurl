@@ -1,8 +1,6 @@
+use crate::protobufs::config::{LoRaConfig, lo_ra_config::ModemPreset, lo_ra_config::RegionCode};
+use crate::protobufs::{ChannelSettings, ModuleSettings};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use meshtastic_protobufs::meshtastic::config::{
-    LoRaConfig, lo_ra_config::ModemPreset, lo_ra_config::RegionCode,
-};
-use meshtastic_protobufs::meshtastic::{ChannelSettings, ModuleSettings};
 
 /// User role in the Meshtastic mesh network.
 ///
@@ -65,50 +63,20 @@ pub trait MeshtasticDisplay {
 }
 
 impl MeshtasticDisplay for RegionCode {
-    /// Converts RegionCode to uppercase string (e.g., "US", "EU868", "CN").
+    /// Returns the name the protobuf gives this region, such as "EU_868".
+    ///
+    /// Generated from the definitions rather than written out here: the hand
+    /// written table silently fell behind the firmware, which is how seven
+    /// regions ended up missing.
     fn to_mesh_string(&self) -> &'static str {
-        match self {
-            RegionCode::Unset => "Unset",
-            RegionCode::Us => "US",
-            RegionCode::Eu433 => "EU433",
-            RegionCode::Eu868 => "EU868",
-            RegionCode::Cn => "CN",
-            RegionCode::Jp => "JP",
-            RegionCode::Anz => "ANZ",
-            RegionCode::Kr => "KR",
-            RegionCode::Tw => "TW",
-            RegionCode::Ru => "RU",
-            RegionCode::In => "IN",
-            RegionCode::Nz865 => "NZ865",
-            RegionCode::Th => "TH",
-            RegionCode::Lora24 => "Lora24",
-            RegionCode::Ua433 => "UA433",
-            RegionCode::Ua868 => "UA868",
-            RegionCode::My433 => "MY433",
-            RegionCode::My919 => "MY919",
-            RegionCode::Sg923 => "SG923",
-            RegionCode::Ph433 => "PH433",
-            RegionCode::Ph868 => "PH868",
-            RegionCode::Ph915 => "PH915",
-            RegionCode::Anz433 => "ANZ433",
-        }
+        self.as_str_name()
     }
 }
 
 impl MeshtasticDisplay for ModemPreset {
-    /// Converts ModemPreset to string (e.g., "LongFast", "ShortSlow").
+    /// Returns the name the protobuf gives this preset, such as "LONG_FAST".
     fn to_mesh_string(&self) -> &'static str {
-        match self {
-            ModemPreset::LongFast => "LongFast",
-            ModemPreset::LongSlow => "LongSlow",
-            ModemPreset::VeryLongSlow => "VeryLongSlow",
-            ModemPreset::MediumSlow => "MediumSlow",
-            ModemPreset::MediumFast => "MediumFast",
-            ModemPreset::ShortSlow => "ShortSlow",
-            ModemPreset::ShortFast => "ShortFast",
-            ModemPreset::LongModerate => "LongModerate",
-            ModemPreset::ShortTurbo => "ShortTurbo",
-        }
+        self.as_str_name()
     }
 }
 
@@ -118,6 +86,9 @@ impl MeshtasticDisplay for ModemPreset {
 /// something to choose. Keeping the single list here stops the CLI, the TUI and
 /// the string parser from drifting apart, which is how seven regions ended up
 /// reachable from a decoded URL but not from either interface.
+// UA_868 is marked deprecated upstream but devices still run it, so it stays
+// selectable; dropping it would mean no way to reproduce an existing setup.
+#[allow(deprecated)]
 pub const REGION_CODES: &[RegionCode] = &[
     RegionCode::Us,
     RegionCode::Eu433,
@@ -141,19 +112,49 @@ pub const REGION_CODES: &[RegionCode] = &[
     RegionCode::Ph868,
     RegionCode::Ph915,
     RegionCode::Anz433,
+    // Added by firmware 2.8.
+    RegionCode::Kz433,
+    RegionCode::Kz863,
+    RegionCode::Np865,
+    RegionCode::Br902,
+    RegionCode::Itu12m,
+    RegionCode::Itu22m,
+    RegionCode::Eu866,
+    RegionCode::Eu874,
+    RegionCode::Eu917,
+    RegionCode::EuN868,
+    RegionCode::Itu32m,
+    RegionCode::Itu170cm,
+    RegionCode::Itu270cm,
+    RegionCode::Itu370cm,
+    RegionCode::Itu2125cm,
 ];
 
 /// Every modem preset a user can select.
+///
+/// `VERY_LONG_SLOW` is left out: the firmware deprecated it in 2.5 and now
+/// treats it as an illegal value, falling back to `LONG_FAST`.
+// LONG_SLOW is deprecated upstream but the firmware still implements it, so it
+// stays selectable. VERY_LONG_SLOW does not: the firmware treats it as illegal.
+#[allow(deprecated)]
 pub const MODEM_PRESETS: &[ModemPreset] = &[
     ModemPreset::LongFast,
     ModemPreset::LongSlow,
-    ModemPreset::VeryLongSlow,
+    ModemPreset::LongModerate,
     ModemPreset::MediumSlow,
     ModemPreset::MediumFast,
     ModemPreset::ShortSlow,
     ModemPreset::ShortFast,
-    ModemPreset::LongModerate,
     ModemPreset::ShortTurbo,
+    // Added by firmware 2.8.
+    ModemPreset::LongTurbo,
+    ModemPreset::MediumTurbo,
+    ModemPreset::LiteFast,
+    ModemPreset::LiteSlow,
+    ModemPreset::NarrowFast,
+    ModemPreset::NarrowSlow,
+    ModemPreset::TinyFast,
+    ModemPreset::TinySlow,
 ];
 
 /// Position precision options for Meshtastic channels.
@@ -238,41 +239,28 @@ impl NodeInfo {
     ///
     /// # Example
     /// ```
-    /// use meshtastic_protobufs::meshtastic::{NodeInfo as PbNodeInfo, User};
+    /// use meshurl::protobufs::{NodeInfo as PbNodeInfo, User};
     /// use meshurl::models::NodeInfo;
     ///
+    /// // Only the fields this conversion reads are set; the rest keep their
+    /// // protobuf defaults, so a new field upstream does not break this.
     /// let user = User {
-    ///     id: "!test".to_string(),
     ///     long_name: "Test Node".to_string(),
     ///     short_name: "TST".to_string(),
-    ///     macaddr: vec![],
-    ///     hw_model: 0,
-    ///     is_licensed: false,
-    ///     role: 0,
-    ///     public_key: vec![],
-    ///     is_unmessagable: None,
+    ///     ..Default::default()
     /// };
     ///
     /// let pb_node = PbNodeInfo {
     ///     num: 12345,
     ///     user: Some(user),
-    ///     position: None,
-    ///     snr: 0.0,
-    ///     last_heard: 0,
-    ///     device_metrics: None,
-    ///     channel: 0,
-    ///     via_mqtt: false,
-    ///     hops_away: None,
-    ///     is_favorite: false,
-    ///     is_ignored: false,
-    ///     is_key_manually_verified: false,
+    ///     ..Default::default()
     /// };
     ///
     /// let node_info = NodeInfo::from_pb(&pb_node);
     /// assert_eq!(node_info.num, 12345);
     /// assert_eq!(node_info.long_name, "Test Node");
     /// ```
-    pub fn from_pb(node: &meshtastic_protobufs::meshtastic::NodeInfo) -> Self {
+    pub fn from_pb(node: &crate::protobufs::NodeInfo) -> Self {
         let (long_name, short_name, hw_model, role, public_key, is_unmessagable) =
             if let Some(ref user) = node.user {
                 let role = UserRole::from(user.role);
@@ -316,7 +304,7 @@ impl NodeInfo {
 /// Converts a hardware model integer to its string representation.
 /// Uses the meshtastic-protobufs HardwareModel enum.
 fn hardware_model_to_string(model: i32) -> String {
-    use meshtastic_protobufs::meshtastic::HardwareModel;
+    use crate::protobufs::HardwareModel;
     use std::convert::TryFrom;
 
     if let Ok(hw_model) = HardwareModel::try_from(model) {
@@ -696,14 +684,15 @@ impl ModemConfig {
     /// The radio parameters, resolving a preset to its values.
     ///
     /// Returns (bandwidth in kHz, spreading factor, coding rate denominator).
-    pub fn parameters(&self) -> (u32, u32, u32) {
+    /// The region is needed because a preset is wider on the 2.4 GHz band.
+    pub fn parameters(&self, region: RegionCode) -> (f32, u32, u32) {
         match self {
-            ModemConfig::Preset(preset) => get_preset_params(*preset),
+            ModemConfig::Preset(preset) => get_preset_params(*preset, region),
             ModemConfig::Custom {
                 bandwidth,
                 spread_factor,
                 coding_rate,
-            } => (*bandwidth, *spread_factor, *coding_rate),
+            } => (*bandwidth as f32, *spread_factor, *coding_rate),
         }
     }
 
@@ -759,38 +748,67 @@ pub struct LoRaInfo {
     pub ignore_incoming: Vec<u32>,
 }
 
-/// Get the default LoRa parameters for a given modem preset.
-/// Returns (bandwidth_kHz, spreading_factor, coding_rate).
+/// Whether a region uses the wide bandwidths of the 2.4 GHz band.
+///
+/// The firmware calls this `wideLora`, and it triples every bandwidth that is
+/// not fixed by the preset itself.
+pub fn region_is_wide_band(region: RegionCode) -> bool {
+    matches!(region, RegionCode::Lora24)
+}
+
+/// Get the radio parameters for a modem preset, as the firmware computes them.
+///
+/// Returns (bandwidth in kHz, spreading factor, coding rate denominator).
+/// Mirrors `modemPresetToParams()` in the firmware, including the wide band
+/// variants: reading these values from anywhere else has already put four wrong
+/// presets in front of users.
 ///
 /// # Arguments
 /// * `preset` - The modem preset to get parameters for
-///
-/// # Returns
-/// A tuple of (bandwidth in kHz, spreading factor, coding rate denominator)
+/// * `region` - The region in use, which decides the bandwidth on 2.4 GHz
 ///
 /// # Example
 /// ```
-/// use meshurl::{get_preset_params, ModemPreset};
+/// use meshurl::{ModemPreset, RegionCode, get_preset_params};
 ///
-/// let (bw, sf, cr) = get_preset_params(ModemPreset::LongFast);
-/// assert_eq!(bw, 250);  // 250 kHz
-/// assert_eq!(sf, 11);   // SF11
+/// let (bw, sf, cr) = get_preset_params(ModemPreset::LongFast, RegionCode::Eu868);
+/// assert_eq!(bw, 250.0); // 250 kHz
+/// assert_eq!(sf, 11);    // SF11
 /// assert_eq!(cr, 5);     // 4/5
+///
+/// // The same preset is wider on the 2.4 GHz band.
+/// let (bw, _, _) = get_preset_params(ModemPreset::LongFast, RegionCode::Lora24);
+/// assert_eq!(bw, 812.5);
 /// ```
-pub fn get_preset_params(
-    preset: meshtastic_protobufs::meshtastic::config::lo_ra_config::ModemPreset,
-) -> (u32, u32, u32) {
-    use meshtastic_protobufs::meshtastic::config::lo_ra_config::ModemPreset;
+#[allow(deprecated)]
+pub fn get_preset_params(preset: ModemPreset, region: RegionCode) -> (f32, u32, u32) {
+    let wide = region_is_wide_band(region);
+
+    // Presets whose bandwidth follows the band.
+    let narrow = if wide { 406.25 } else { 125.0 };
+    let medium = if wide { 812.5 } else { 250.0 };
+    let turbo = if wide { 1625.0 } else { 500.0 };
+
     match preset {
-        ModemPreset::LongFast => (250, 11, 5),
-        ModemPreset::LongSlow => (250, 12, 5),
-        ModemPreset::VeryLongSlow => (125, 12, 8),
-        ModemPreset::MediumSlow => (125, 10, 5),
-        ModemPreset::MediumFast => (250, 9, 5),
-        ModemPreset::ShortSlow => (125, 8, 5),
-        ModemPreset::ShortFast => (250, 7, 5),
-        ModemPreset::LongModerate => (250, 10, 5),
-        ModemPreset::ShortTurbo => (500, 7, 5),
+        ModemPreset::ShortTurbo => (turbo, 7, 5),
+        ModemPreset::ShortFast => (medium, 7, 5),
+        ModemPreset::ShortSlow => (medium, 8, 5),
+        ModemPreset::MediumFast => (medium, 9, 5),
+        ModemPreset::MediumSlow => (medium, 10, 5),
+        ModemPreset::MediumTurbo => (turbo, 9, 5),
+        ModemPreset::LongTurbo => (turbo, 11, 8),
+        ModemPreset::LongModerate => (narrow, 11, 8),
+        ModemPreset::LongSlow => (narrow, 12, 8),
+        // These are tied to a fixed bandwidth whatever the band.
+        ModemPreset::LiteFast => (125.0, 9, 5),
+        ModemPreset::LiteSlow => (125.0, 10, 5),
+        ModemPreset::NarrowFast => (62.5, 7, 6),
+        ModemPreset::NarrowSlow => (62.5, 8, 6),
+        ModemPreset::TinyFast => (15.6, 7, 5),
+        ModemPreset::TinySlow => (15.6, 8, 6),
+        // LongFast, and the deprecated VeryLongSlow, which the firmware treats
+        // as an illegal value and falls back on.
+        ModemPreset::LongFast | ModemPreset::VeryLongSlow => (medium, 11, 5),
     }
 }
 
@@ -817,7 +835,7 @@ impl From<&ChannelSettings> for ChannelInfo {
                 } else {
                     None
                 };
-                (prec, ms.is_client_muted)
+                (prec, ms.is_muted)
             })
             .unwrap_or((None, false));
 
@@ -886,7 +904,7 @@ pub struct MeshtasticConfig {
 impl MeshtasticConfig {
     /// Creates a MeshtasticConfig from a protobuf ChannelSet.
     /// This is used when decoding a URL to extract all configuration.
-    pub fn from_channel_set(channel_set: &meshtastic_protobufs::meshtastic::ChannelSet) -> Self {
+    pub fn from_channel_set(channel_set: &crate::protobufs::ChannelSet) -> Self {
         let channels: Vec<ChannelInfo> = channel_set
             .settings
             .iter()
@@ -936,7 +954,7 @@ impl From<&ChannelInfo> for ChannelSettings {
         let module_settings = if info.position_precision.is_some() || info.is_client_muted {
             Some(ModuleSettings {
                 position_precision: info.position_precision.unwrap_or(0),
-                is_client_muted: info.is_client_muted,
+                is_muted: info.is_client_muted,
             })
         } else {
             None
@@ -957,7 +975,7 @@ impl From<&ChannelInfo> for ChannelSettings {
 /// This is used when encoding a URL to create the binary config.
 impl From<&LoRaInfo> for LoRaConfig {
     fn from(info: &LoRaInfo) -> Self {
-        let (bandwidth, spread_factor, coding_rate) = info.modem.parameters();
+        let (bandwidth, spread_factor, coding_rate) = info.modem_parameters();
 
         LoRaConfig {
             region: info.region as i32,
@@ -967,7 +985,10 @@ impl From<&LoRaInfo> for LoRaConfig {
             use_preset: info.modem.uses_preset(),
             tx_enabled: info.tx_enabled,
             tx_power: info.tx_power,
-            bandwidth,
+            // The protobuf field is an integer, so a fractional preset
+            // bandwidth such as 62.5 kHz is stored rounded, as the firmware
+            // stores it too.
+            bandwidth: bandwidth.round() as u32,
             spread_factor,
             coding_rate,
             hop_limit: info.hop_limit,
@@ -980,11 +1001,23 @@ impl From<&LoRaInfo> for LoRaConfig {
             ignore_mqtt: info.ignore_mqtt,
             config_ok_to_mqtt: info.config_ok_to_mqtt,
             ignore_incoming: info.ignore_incoming.clone(),
+            // Fields meshurl does not model keep their protobuf defaults.
+            ..Default::default()
         }
     }
 }
 
+impl LoRaInfo {
+    /// The radio parameters in use, resolving a preset against the region.
+    pub fn modem_parameters(&self) -> (f32, u32, u32) {
+        self.modem.parameters(self.region)
+    }
+}
+
 #[cfg(test)]
+// Deprecated regions and presets still run on deployed devices, so the
+// tests keep exercising them.
+#[allow(deprecated)]
 mod tests {
     use super::*;
 
@@ -1209,7 +1242,7 @@ mod tests {
         let info = LoRaInfo::from(&lora_config(true, 0, 0, 0));
 
         assert_eq!(info.modem, ModemConfig::Preset(ModemPreset::LongFast));
-        assert_eq!(info.modem.parameters(), (250, 11, 5));
+        assert_eq!(info.modem_parameters(), (250.0, 11, 5));
     }
 
     #[test]
@@ -1218,7 +1251,7 @@ mod tests {
         let info = LoRaInfo::from(&lora_config(false, 62, 7, 6));
 
         assert!(!info.modem.uses_preset());
-        assert_eq!(info.modem.parameters(), (62, 7, 6));
+        assert_eq!(info.modem_parameters(), (62.0, 7, 6));
     }
 
     #[test]
@@ -1228,7 +1261,7 @@ mod tests {
         let info = LoRaInfo::from(&lora_config(false, 250, 11, 5));
 
         assert!(!info.modem.uses_preset());
-        assert_eq!(info.modem.parameters(), (250, 11, 5));
+        assert_eq!(info.modem_parameters(), (250.0, 11, 5));
     }
 
     #[test]
@@ -1236,7 +1269,7 @@ mod tests {
         // 250 is 250 kHz, not 250 Hz: dividing by 1000 first zeroed it out.
         let info = LoRaInfo::from(&lora_config(false, 250, 11, 5));
 
-        assert_eq!(info.modem.parameters().0, 250);
+        assert_eq!(info.modem_parameters().0, 250.0);
     }
 
     #[test]
@@ -1258,7 +1291,7 @@ mod tests {
 
         assert!(!encoded.use_preset);
         assert_eq!(decoded.modem, info.modem);
-        assert_eq!(decoded.modem.parameters(), (62, 7, 6));
+        assert_eq!(decoded.modem_parameters(), (62.0, 7, 6));
     }
 
     #[test]
@@ -1401,48 +1434,154 @@ mod tests {
         assert_eq!(channel.name, "Test_Ch-123");
     }
 
+    /// The table in `modemPresetToParams()` of firmware 2.8, which is the
+    /// authority. Four of our presets used to disagree with it.
+    #[test]
+    fn test_preset_parameters_match_the_firmware() {
+        #[allow(deprecated)]
+        let expected: &[(ModemPreset, f32, u32, u32)] = &[
+            (ModemPreset::LongFast, 250.0, 11, 5),
+            (ModemPreset::LongSlow, 125.0, 12, 8),
+            (ModemPreset::LongModerate, 125.0, 11, 8),
+            (ModemPreset::LongTurbo, 500.0, 11, 8),
+            (ModemPreset::MediumSlow, 250.0, 10, 5),
+            (ModemPreset::MediumFast, 250.0, 9, 5),
+            (ModemPreset::MediumTurbo, 500.0, 9, 5),
+            (ModemPreset::ShortSlow, 250.0, 8, 5),
+            (ModemPreset::ShortFast, 250.0, 7, 5),
+            (ModemPreset::ShortTurbo, 500.0, 7, 5),
+            (ModemPreset::LiteFast, 125.0, 9, 5),
+            (ModemPreset::LiteSlow, 125.0, 10, 5),
+            (ModemPreset::NarrowFast, 62.5, 7, 6),
+            (ModemPreset::NarrowSlow, 62.5, 8, 6),
+            (ModemPreset::TinyFast, 15.6, 7, 5),
+            (ModemPreset::TinySlow, 15.6, 8, 6),
+        ];
+
+        for (preset, bandwidth, spread_factor, coding_rate) in expected {
+            assert_eq!(
+                get_preset_params(*preset, RegionCode::Eu868),
+                (*bandwidth, *spread_factor, *coding_rate),
+                "{} does not match the firmware",
+                preset.to_mesh_string()
+            );
+        }
+    }
+
+    #[test]
+    fn test_the_wide_band_uses_wider_bandwidths() {
+        // On 2.4 GHz the firmware triples the bandwidth of the presets that
+        // are not pinned to a fixed one.
+        assert_eq!(
+            get_preset_params(ModemPreset::LongFast, RegionCode::Lora24),
+            (812.5, 11, 5)
+        );
+        assert_eq!(
+            get_preset_params(ModemPreset::ShortTurbo, RegionCode::Lora24),
+            (1625.0, 7, 5)
+        );
+        assert_eq!(
+            get_preset_params(ModemPreset::LongModerate, RegionCode::Lora24),
+            (406.25, 11, 8)
+        );
+
+        // These keep their bandwidth whatever the band.
+        assert_eq!(
+            get_preset_params(ModemPreset::NarrowFast, RegionCode::Lora24),
+            (62.5, 7, 6)
+        );
+        assert_eq!(
+            get_preset_params(ModemPreset::TinyFast, RegionCode::Lora24),
+            (15.6, 7, 5)
+        );
+    }
+
+    #[test]
+    fn test_a_2_8_region_survives_a_protobuf_round_trip() {
+        // These used to decode as Unset and be dropped on the way back out.
+        for region in [
+            RegionCode::Itu170cm,
+            RegionCode::Kz433,
+            RegionCode::Br902,
+            RegionCode::EuN868,
+        ] {
+            let info = LoRaInfo {
+                region,
+                ..Default::default()
+            };
+            let decoded = LoRaInfo::from(&LoRaConfig::from(&info));
+            assert_eq!(decoded.region, region);
+        }
+    }
+
+    #[test]
+    fn test_a_2_8_preset_survives_a_protobuf_round_trip() {
+        for preset in [
+            ModemPreset::NarrowFast,
+            ModemPreset::MediumTurbo,
+            ModemPreset::TinySlow,
+            ModemPreset::LongTurbo,
+        ] {
+            let info = LoRaInfo {
+                modem: ModemConfig::Preset(preset),
+                ..Default::default()
+            };
+            let decoded = LoRaInfo::from(&LoRaConfig::from(&info));
+            assert_eq!(decoded.modem, ModemConfig::Preset(preset));
+        }
+    }
+
     #[test]
     fn test_region_code_to_mesh_string() {
-        use meshtastic_protobufs::meshtastic::config::lo_ra_config::RegionCode;
-
         assert_eq!(RegionCode::Us.to_mesh_string(), "US");
-        assert_eq!(RegionCode::Eu433.to_mesh_string(), "EU433");
-        assert_eq!(RegionCode::Eu868.to_mesh_string(), "EU868");
-        assert_eq!(RegionCode::Cn.to_mesh_string(), "CN");
-        assert_eq!(RegionCode::Jp.to_mesh_string(), "JP");
-        assert_eq!(RegionCode::Anz.to_mesh_string(), "ANZ");
-        assert_eq!(RegionCode::Kr.to_mesh_string(), "KR");
-        assert_eq!(RegionCode::Tw.to_mesh_string(), "TW");
-        assert_eq!(RegionCode::Ru.to_mesh_string(), "RU");
-        assert_eq!(RegionCode::In.to_mesh_string(), "IN");
-        assert_eq!(RegionCode::Nz865.to_mesh_string(), "NZ865");
-        assert_eq!(RegionCode::Th.to_mesh_string(), "TH");
-        assert_eq!(RegionCode::Lora24.to_mesh_string(), "Lora24");
-        assert_eq!(RegionCode::Ua433.to_mesh_string(), "UA433");
-        assert_eq!(RegionCode::Ua868.to_mesh_string(), "UA868");
-        assert_eq!(RegionCode::My433.to_mesh_string(), "MY433");
-        assert_eq!(RegionCode::My919.to_mesh_string(), "MY919");
-        assert_eq!(RegionCode::Sg923.to_mesh_string(), "SG923");
-        assert_eq!(RegionCode::Ph433.to_mesh_string(), "PH433");
-        assert_eq!(RegionCode::Ph868.to_mesh_string(), "PH868");
-        assert_eq!(RegionCode::Ph915.to_mesh_string(), "PH915");
-        assert_eq!(RegionCode::Anz433.to_mesh_string(), "ANZ433");
-        assert_eq!(RegionCode::Unset.to_mesh_string(), "Unset");
+        assert_eq!(RegionCode::Eu868.to_mesh_string(), "EU_868");
+        assert_eq!(RegionCode::Lora24.to_mesh_string(), "LORA_24");
+        assert_eq!(RegionCode::Unset.to_mesh_string(), "UNSET");
+        // Regions that arrived with firmware 2.8.
+        assert_eq!(RegionCode::Kz433.to_mesh_string(), "KZ_433");
+        assert_eq!(RegionCode::Br902.to_mesh_string(), "BR_902");
+        assert_eq!(RegionCode::Itu170cm.to_mesh_string(), "ITU1_70CM");
+        assert_eq!(RegionCode::EuN868.to_mesh_string(), "EU_N_868");
+    }
+
+    /// Rather than listing every name, which is what fell behind the firmware,
+    /// check the property: each selectable region has its own non-empty name.
+    #[test]
+    fn test_every_region_has_a_distinct_name() {
+        let mut names: Vec<&str> = REGION_CODES
+            .iter()
+            .map(|region| region.to_mesh_string())
+            .collect();
+        assert!(names.iter().all(|name| !name.is_empty()));
+
+        let total = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), total, "two regions share a name");
     }
 
     #[test]
     fn test_modem_preset_to_mesh_string() {
-        use meshtastic_protobufs::meshtastic::config::lo_ra_config::ModemPreset;
+        assert_eq!(ModemPreset::LongFast.to_mesh_string(), "LONG_FAST");
+        assert_eq!(ModemPreset::ShortTurbo.to_mesh_string(), "SHORT_TURBO");
+        // Presets that arrived with firmware 2.8.
+        assert_eq!(ModemPreset::NarrowFast.to_mesh_string(), "NARROW_FAST");
+        assert_eq!(ModemPreset::MediumTurbo.to_mesh_string(), "MEDIUM_TURBO");
+        assert_eq!(ModemPreset::TinySlow.to_mesh_string(), "TINY_SLOW");
+    }
 
-        assert_eq!(ModemPreset::LongFast.to_mesh_string(), "LongFast");
-        assert_eq!(ModemPreset::LongSlow.to_mesh_string(), "LongSlow");
-        assert_eq!(ModemPreset::VeryLongSlow.to_mesh_string(), "VeryLongSlow");
-        assert_eq!(ModemPreset::MediumSlow.to_mesh_string(), "MediumSlow");
-        assert_eq!(ModemPreset::MediumFast.to_mesh_string(), "MediumFast");
-        assert_eq!(ModemPreset::ShortSlow.to_mesh_string(), "ShortSlow");
-        assert_eq!(ModemPreset::ShortFast.to_mesh_string(), "ShortFast");
-        assert_eq!(ModemPreset::LongModerate.to_mesh_string(), "LongModerate");
-        assert_eq!(ModemPreset::ShortTurbo.to_mesh_string(), "ShortTurbo");
+    #[test]
+    fn test_every_preset_has_a_distinct_name() {
+        let mut names: Vec<&str> = MODEM_PRESETS
+            .iter()
+            .map(|preset| preset.to_mesh_string())
+            .collect();
+        assert!(names.iter().all(|name| !name.is_empty()));
+
+        let total = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), total, "two presets share a name");
     }
 
     #[test]

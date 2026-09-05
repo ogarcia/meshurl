@@ -1,8 +1,8 @@
 //! Meshtastic URL encoder module.
 //! Provides functions to encode Meshtastic configurations into URLs.
 
+use crate::protobufs::ChannelSet;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use meshtastic_protobufs::meshtastic::ChannelSet;
 use prost::Message;
 
 use crate::errors::EncodeError;
@@ -40,7 +40,7 @@ pub fn encode_url_short(config: &MeshtasticConfig) -> Result<String, EncodeError
     Ok(format!("#{}", base64))
 }
 
-pub use meshtastic_protobufs::meshtastic::config::lo_ra_config::{ModemPreset, RegionCode};
+pub use crate::protobufs::config::lo_ra_config::{ModemPreset, RegionCode};
 
 /// Looks up a region by name, case-insensitively.
 ///
@@ -66,7 +66,7 @@ pub fn modem_preset_from_str(s: &str) -> Option<ModemPreset> {
 
 /// Creates a protobuf ChannelSet from a MeshtasticConfig.
 fn create_channel_set(config: &MeshtasticConfig) -> Result<ChannelSet, EncodeError> {
-    let settings: Vec<meshtastic_protobufs::meshtastic::ChannelSettings> =
+    let settings: Vec<crate::protobufs::ChannelSettings> =
         config.channels.iter().map(|ch| ch.into()).collect();
 
     let lora_config = config.lora.as_ref().map(|l| l.into());
@@ -91,10 +91,13 @@ fn encode_base64(data: &[u8]) -> Result<String, EncodeError> {
 }
 
 #[cfg(test)]
+// Deprecated regions and presets still run on deployed devices, so the
+// tests keep exercising them.
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use crate::models::{ChannelInfo, ChannelRole, DEFAULT_PSK, LoRaInfo, ModemConfig, PskType};
-    use meshtastic_protobufs::meshtastic::config::lo_ra_config::{ModemPreset, RegionCode};
+    use crate::protobufs::config::lo_ra_config::{ModemPreset, RegionCode};
 
     #[test]
     fn test_encode_empty_config() {
@@ -190,16 +193,16 @@ mod tests {
 
     #[test]
     fn test_region_code_from_str() {
-        use meshtastic_protobufs::meshtastic::config::lo_ra_config::RegionCode;
+        use crate::protobufs::config::lo_ra_config::RegionCode;
 
         assert_eq!(region_code_from_str("US"), Some(RegionCode::Us));
-        assert_eq!(region_code_from_str("EU868"), Some(RegionCode::Eu868));
+        assert_eq!(region_code_from_str("EU_868"), Some(RegionCode::Eu868));
         assert_eq!(region_code_from_str("CN"), Some(RegionCode::Cn));
         assert_eq!(region_code_from_str("JP"), Some(RegionCode::Jp));
         // Regions the CLI and TUI used to be missing.
-        assert_eq!(region_code_from_str("PH915"), Some(RegionCode::Ph915));
-        assert_eq!(region_code_from_str("MY433"), Some(RegionCode::My433));
-        assert_eq!(region_code_from_str("ANZ433"), Some(RegionCode::Anz433));
+        assert_eq!(region_code_from_str("PH_915"), Some(RegionCode::Ph915));
+        assert_eq!(region_code_from_str("MY_433"), Some(RegionCode::My433));
+        assert_eq!(region_code_from_str("ANZ_433"), Some(RegionCode::Anz433));
         // An unknown name is rejected, not quietly turned into EU868.
         assert_eq!(region_code_from_str("unknown"), None);
         assert_eq!(region_code_from_str(""), None);
@@ -207,10 +210,10 @@ mod tests {
 
     #[test]
     fn test_region_code_from_str_is_case_insensitive() {
-        use meshtastic_protobufs::meshtastic::config::lo_ra_config::RegionCode;
+        use crate::protobufs::config::lo_ra_config::RegionCode;
 
-        assert_eq!(region_code_from_str("eu868"), Some(RegionCode::Eu868));
-        assert_eq!(region_code_from_str("lora24"), Some(RegionCode::Lora24));
+        assert_eq!(region_code_from_str("eu_868"), Some(RegionCode::Eu868));
+        assert_eq!(region_code_from_str("lora_24"), Some(RegionCode::Lora24));
     }
 
     #[test]
@@ -229,22 +232,30 @@ mod tests {
 
     #[test]
     fn test_modem_preset_from_str() {
-        use meshtastic_protobufs::meshtastic::config::lo_ra_config::ModemPreset;
+        use crate::protobufs::config::lo_ra_config::ModemPreset;
 
         assert_eq!(
-            modem_preset_from_str("LongFast"),
+            modem_preset_from_str("LONG_FAST"),
             Some(ModemPreset::LongFast)
         );
         assert_eq!(
-            modem_preset_from_str("LongSlow"),
+            modem_preset_from_str("LONG_SLOW"),
             Some(ModemPreset::LongSlow)
         );
+        // VERY_LONG_SLOW is no longer offered: the firmware deprecated it in
+        // 2.5 and now falls back to LONG_FAST when it sees it.
+        assert_eq!(modem_preset_from_str("VERY_LONG_SLOW"), None);
+        // Presets that arrived with firmware 2.8.
         assert_eq!(
-            modem_preset_from_str("VeryLongSlow"),
-            Some(ModemPreset::VeryLongSlow)
+            modem_preset_from_str("NARROW_FAST"),
+            Some(ModemPreset::NarrowFast)
         );
         assert_eq!(
-            modem_preset_from_str("ShortTurbo"),
+            modem_preset_from_str("MEDIUM_TURBO"),
+            Some(ModemPreset::MediumTurbo)
+        );
+        assert_eq!(
+            modem_preset_from_str("SHORT_TURBO"),
             Some(ModemPreset::ShortTurbo)
         );
         assert_eq!(modem_preset_from_str("unknown"), None);
@@ -266,7 +277,7 @@ mod tests {
 
     #[test]
     fn test_encode_decode_roundtrip_all_modem_presets() {
-        use meshtastic_protobufs::meshtastic::config::lo_ra_config::ModemPreset;
+        use crate::protobufs::config::lo_ra_config::ModemPreset;
 
         let presets = [
             ModemPreset::LongFast,
@@ -324,7 +335,7 @@ mod tests {
 
     #[test]
     fn test_encode_decode_roundtrip_all_regions() {
-        use meshtastic_protobufs::meshtastic::config::lo_ra_config::RegionCode;
+        use crate::protobufs::config::lo_ra_config::RegionCode;
 
         let regions = [
             RegionCode::Us,

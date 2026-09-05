@@ -179,8 +179,8 @@ pub fn print_lora(lora: &LoRaInfo) {
         print_yes_no("TX enabled:", lora.tx_enabled);
     }
 
-    let (bandwidth, spread_factor, coding_rate) = lora.modem.parameters();
-    if bandwidth > 0 {
+    let (bandwidth, spread_factor, coding_rate) = lora.modem_parameters();
+    if bandwidth > 0.0 {
         println!("    {} {} kHz", "Bandwidth:".color(Color::White), bandwidth);
         println!(
             "    {} {}",

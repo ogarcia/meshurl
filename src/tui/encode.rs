@@ -164,11 +164,12 @@ pub struct LoRaPopupState {
 
 impl LoRaPopupState {
     pub fn new() -> Self {
-        let (bandwidth, spread_factor, coding_rate) = get_preset_params(ModemPreset::LongFast);
+        let (bandwidth, spread_factor, coding_rate) =
+            get_preset_params(ModemPreset::LongFast, RegionCode::Eu868);
         Self {
             region: RegionCode::Eu868,
             modem_choice: ModemChoice::Preset(ModemPreset::LongFast),
-            bandwidth,
+            bandwidth: bandwidth.round() as u32,
             spread_factor,
             coding_rate,
             tx_power: 0,
@@ -190,7 +191,7 @@ impl LoRaPopupState {
     pub fn from_lora(lora: &LoRaInfo) -> Self {
         // Carry the parameters over whichever mode is in use: dropping them
         // here is what silently turned a manual configuration into LongFast.
-        let (bandwidth, spread_factor, coding_rate) = lora.modem.parameters();
+        let (bandwidth, spread_factor, coding_rate) = lora.modem_parameters();
 
         Self {
             region: lora.region,
@@ -198,7 +199,7 @@ impl LoRaPopupState {
                 Some(preset) => ModemChoice::Preset(preset),
                 None => ModemChoice::Custom,
             },
-            bandwidth,
+            bandwidth: bandwidth.round() as u32,
             spread_factor,
             coding_rate,
             tx_power: lora.tx_power,
@@ -1291,8 +1292,9 @@ pub fn handle_lora_popup_keys(
                         // Seed the manual fields from the preset that was on
                         // screen, so switching to Custom starts somewhere sane.
                         if let ModemChoice::Preset(preset) = state.modem_choice {
-                            let (bandwidth, spread_factor, coding_rate) = get_preset_params(preset);
-                            state.bandwidth = bandwidth;
+                            let (bandwidth, spread_factor, coding_rate) =
+                                get_preset_params(preset, state.region);
+                            state.bandwidth = bandwidth.round() as u32;
                             state.spread_factor = spread_factor;
                             state.coding_rate = coding_rate;
                         }
@@ -1861,7 +1863,7 @@ mod tests {
 
     #[test]
     fn a_disabled_position_adds_no_module_settings() {
-        use meshtastic_protobufs::meshtastic::ChannelSettings;
+        use meshurl::protobufs::ChannelSettings;
 
         let popup = ChannelPopupState::new();
         let (_, channel) = popup.to_channel_info(0).expect("saves");
@@ -2064,13 +2066,13 @@ mod tests {
     #[test]
     fn manual_parameters_survive_the_lora_popup() {
         let lora = decoded_custom_lora();
-        assert_eq!(lora.modem.parameters(), (62, 7, 6));
+        assert_eq!(lora.modem_parameters(), (62.0, 7, 6));
 
         // Open the popup and save without touching anything.
         let saved = LoRaPopupState::from_lora(&lora).to_lora_info();
 
         // These used to come back as LongFast's 250/11/5.
-        assert_eq!(saved.modem.parameters(), (62, 7, 6));
+        assert_eq!(saved.modem_parameters(), (62.0, 7, 6));
         assert!(!saved.modem.uses_preset());
         assert_eq!(saved.modem, lora.modem);
     }
@@ -2114,7 +2116,7 @@ mod tests {
             popup.modem_choice,
             ModemChoice::Preset(ModemPreset::LongFast)
         );
-        assert_eq!(popup.to_lora_info().modem.parameters(), (250, 11, 5));
+        assert_eq!(popup.to_lora_info().modem_parameters(), (250.0, 11, 5));
     }
 
     #[test]
@@ -2131,7 +2133,7 @@ mod tests {
             DecodeResult::Node(_) => panic!("expected a channel URL"),
         };
 
-        assert_eq!(lora.modem.parameters(), (62, 7, 6));
+        assert_eq!(lora.modem_parameters(), (62.0, 7, 6));
         assert_eq!(lora.modem.name(), "Custom");
     }
 

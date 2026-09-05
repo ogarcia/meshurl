@@ -122,11 +122,28 @@ enum Region {
     Ph868,
     Ph915,
     Anz433,
+    // Added by firmware 2.8.
+    Kz433,
+    Kz863,
+    Np865,
+    Br902,
+    Itu12m,
+    Itu22m,
+    Eu866,
+    Eu874,
+    Eu917,
+    EuN868,
+    Itu32m,
+    Itu170cm,
+    Itu270cm,
+    Itu370cm,
+    Itu2125cm,
 }
 
 impl From<Region> for RegionCode {
     /// Maps the command line choice onto the protobuf enum directly, rather
-    /// than through a name that a typo would silently turn into EU868.
+    /// than through a name that a typo would silently turn into EU_868.
+    #[allow(deprecated)] // UA_868 still runs on deployed devices.
     fn from(region: Region) -> Self {
         match region {
             Region::Us => RegionCode::Us,
@@ -151,6 +168,21 @@ impl From<Region> for RegionCode {
             Region::Ph868 => RegionCode::Ph868,
             Region::Ph915 => RegionCode::Ph915,
             Region::Anz433 => RegionCode::Anz433,
+            Region::Kz433 => RegionCode::Kz433,
+            Region::Kz863 => RegionCode::Kz863,
+            Region::Np865 => RegionCode::Np865,
+            Region::Br902 => RegionCode::Br902,
+            Region::Itu12m => RegionCode::Itu12m,
+            Region::Itu22m => RegionCode::Itu22m,
+            Region::Eu866 => RegionCode::Eu866,
+            Region::Eu874 => RegionCode::Eu874,
+            Region::Eu917 => RegionCode::Eu917,
+            Region::EuN868 => RegionCode::EuN868,
+            Region::Itu32m => RegionCode::Itu32m,
+            Region::Itu170cm => RegionCode::Itu170cm,
+            Region::Itu270cm => RegionCode::Itu270cm,
+            Region::Itu370cm => RegionCode::Itu370cm,
+            Region::Itu2125cm => RegionCode::Itu2125cm,
         }
     }
 }
@@ -159,27 +191,43 @@ impl From<Region> for RegionCode {
 enum ModemPresetArg {
     LongFast,
     LongSlow,
-    VeryLongSlow,
+    LongModerate,
     MediumSlow,
     MediumFast,
     ShortSlow,
     ShortFast,
-    LongModerate,
     ShortTurbo,
+    // Added by firmware 2.8.
+    LongTurbo,
+    MediumTurbo,
+    LiteFast,
+    LiteSlow,
+    NarrowFast,
+    NarrowSlow,
+    TinyFast,
+    TinySlow,
 }
 
 impl From<ModemPresetArg> for ModemPreset {
+    #[allow(deprecated)] // LONG_SLOW is deprecated but still implemented.
     fn from(preset: ModemPresetArg) -> Self {
         match preset {
             ModemPresetArg::LongFast => ModemPreset::LongFast,
             ModemPresetArg::LongSlow => ModemPreset::LongSlow,
-            ModemPresetArg::VeryLongSlow => ModemPreset::VeryLongSlow,
+            ModemPresetArg::LongModerate => ModemPreset::LongModerate,
             ModemPresetArg::MediumSlow => ModemPreset::MediumSlow,
             ModemPresetArg::MediumFast => ModemPreset::MediumFast,
             ModemPresetArg::ShortSlow => ModemPreset::ShortSlow,
             ModemPresetArg::ShortFast => ModemPreset::ShortFast,
-            ModemPresetArg::LongModerate => ModemPreset::LongModerate,
             ModemPresetArg::ShortTurbo => ModemPreset::ShortTurbo,
+            ModemPresetArg::LongTurbo => ModemPreset::LongTurbo,
+            ModemPresetArg::MediumTurbo => ModemPreset::MediumTurbo,
+            ModemPresetArg::LiteFast => ModemPreset::LiteFast,
+            ModemPresetArg::LiteSlow => ModemPreset::LiteSlow,
+            ModemPresetArg::NarrowFast => ModemPreset::NarrowFast,
+            ModemPresetArg::NarrowSlow => ModemPreset::NarrowSlow,
+            ModemPresetArg::TinyFast => ModemPreset::TinyFast,
+            ModemPresetArg::TinySlow => ModemPreset::TinySlow,
         }
     }
 }
