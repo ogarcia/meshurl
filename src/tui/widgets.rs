@@ -3,6 +3,7 @@ use meshurl::models::{
 };
 use ratatui::{
     Frame,
+    layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, ListItem, Padding, Paragraph},
@@ -15,6 +16,13 @@ pub struct ToastMessage {
     pub is_uncertain: bool,
 }
 
+/// Horizontal space the toast borders and padding take from its text.
+const TOAST_CHROME_WIDTH: u16 = 4;
+/// Columns left between the toast and the right edge of the screen.
+const TOAST_RIGHT_MARGIN: u16 = 1;
+/// Text plus a top and bottom border.
+const TOAST_HEIGHT: u16 = 3;
+
 pub fn render_toast(f: &mut Frame, toast: &ToastMessage) {
     let color = if toast.is_uncertain {
         Color::Yellow
@@ -24,8 +32,10 @@ pub fn render_toast(f: &mut Frame, toast: &ToastMessage) {
         Color::Red
     };
     let area = f.area();
-    let width = toast.text.len() as u16 + 4;
-    let toast_area = ratatui::layout::Rect::new(area.width.saturating_sub(width) - 1, 1, width, 3);
+    let toast_area = match toast_area(area, &toast.text) {
+        Some(rect) => rect,
+        None => return,
+    };
     f.render_widget(Clear, toast_area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -35,6 +45,31 @@ pub fn render_toast(f: &mut Frame, toast: &ToastMessage) {
         .style(Style::default().fg(color))
         .block(block);
     f.render_widget(paragraph, toast_area);
+}
+
+/// Places the toast in the top-right corner, clamped to the screen.
+///
+/// Returns `None` when the screen is too small to hold it at all. The width is
+/// measured in terminal columns rather than bytes, so a message carrying
+/// multi-byte characters does not overflow the box it is drawn in.
+fn toast_area(area: Rect, text: &str) -> Option<Rect> {
+    if area.width <= TOAST_RIGHT_MARGIN || area.height == 0 {
+        return None;
+    }
+
+    let text_width = Line::from(text).width() as u16;
+    let available = area.width - TOAST_RIGHT_MARGIN;
+    let width = text_width
+        .saturating_add(TOAST_CHROME_WIDTH)
+        .min(available)
+        .max(1);
+    let height = TOAST_HEIGHT.min(area.height);
+
+    let x = area.x + available - width;
+    // Sit one row below the top edge when there is room for it.
+    let y = area.y + u16::from(area.height > height);
+
+    Some(Rect::new(x, y, width, height))
 }
 
 pub fn yes_no(value: bool) -> &'static str {
@@ -380,4 +415,80 @@ pub fn channel_list_item(index: usize, channel: &ChannelInfo) -> ListItem<'_> {
     }
 
     ListItem::new(lines).style(Style::default().fg(Color::White))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    fn toast(text: &str) -> ToastMessage {
+        ToastMessage {
+            text: text.to_string(),
+            is_success: true,
+            is_uncertain: false,
+        }
+    }
+
+    fn draw_toast(width: u16, height: u16, text: &str) {
+        let mut terminal =
+            Terminal::new(TestBackend::new(width, height)).expect("test backend starts");
+        terminal
+            .draw(|f| render_toast(f, &toast(text)))
+            .expect("toast renders");
+    }
+
+    /// The longest message the TUI can raise, on a screen too small for it.
+    const LONG_TOAST: &str = "Seems copied (if not work install wl-clipboard or xclip)";
+
+    #[test]
+    fn renders_on_a_narrow_screen() {
+        draw_toast(20, 10, LONG_TOAST);
+    }
+
+    #[test]
+    fn renders_on_a_tiny_screen() {
+        draw_toast(1, 1, LONG_TOAST);
+        draw_toast(2, 2, "ok");
+    }
+
+    #[test]
+    fn renders_with_multi_byte_text() {
+        // Bytes and columns disagree here: naive byte length overflows the box.
+        draw_toast(40, 10, "Copiado 🐙🐙🐙");
+    }
+
+    #[test]
+    fn area_stays_inside_the_screen() {
+        let screen = Rect::new(0, 0, 20, 10);
+        let area = toast_area(screen, LONG_TOAST).expect("fits after clamping");
+
+        assert!(area.right() <= screen.right());
+        assert!(area.bottom() <= screen.bottom());
+    }
+
+    #[test]
+    fn area_hugs_the_right_edge() {
+        let screen = Rect::new(0, 0, 80, 24);
+        let area = toast_area(screen, "Copied to clipboard!").expect("fits");
+
+        assert_eq!(area.right(), screen.right() - TOAST_RIGHT_MARGIN);
+        assert_eq!(area.width, 20 + TOAST_CHROME_WIDTH);
+        assert_eq!(area.y, 1);
+    }
+
+    #[test]
+    fn area_is_none_when_there_is_no_room() {
+        assert!(toast_area(Rect::new(0, 0, 1, 10), "x").is_none());
+        assert!(toast_area(Rect::new(0, 0, 20, 0), "x").is_none());
+    }
+
+    #[test]
+    fn area_is_measured_in_columns_not_bytes() {
+        let screen = Rect::new(0, 0, 80, 24);
+        // Four bytes, two columns.
+        let area = toast_area(screen, "🐙").expect("fits");
+
+        assert_eq!(area.width, 2 + TOAST_CHROME_WIDTH);
+    }
 }
