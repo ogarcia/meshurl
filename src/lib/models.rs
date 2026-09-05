@@ -450,6 +450,36 @@ pub struct ChannelInfo {
     pub is_client_muted: bool,
 }
 
+/// Splits a channel spec on commas, honouring `\,` as a literal comma.
+///
+/// Channel names and passphrases can contain commas, which a plain split makes
+/// impossible to express: `psk_passphrase=one, two` used to be read as an
+/// unknown option named "two".
+fn split_options(spec: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut chars = spec.chars();
+
+    while let Some(character) = chars.next() {
+        match character {
+            '\\' => match chars.next() {
+                // Only commas need escaping, so any other backslash is literal.
+                Some(',') => current.push(','),
+                Some(other) => {
+                    current.push('\\');
+                    current.push(other);
+                }
+                None => current.push('\\'),
+            },
+            ',' => parts.push(std::mem::take(&mut current)),
+            _ => current.push(character),
+        }
+    }
+    parts.push(current);
+
+    parts
+}
+
 /// Implements conversion from a text string to ChannelInfo.
 /// Expected format: key=value pairs separated by commas.
 /// Supported keys: name, psk, psk_mode, uplink, downlink, pos, muted
@@ -477,10 +507,11 @@ impl std::str::FromStr for ChannelInfo {
         let mut position_precision: Option<u32> = None;
         let mut muted = false;
 
-        for part in s.split(',') {
-            let parts: Vec<&str> = part.splitn(2, '=').collect();
-            let key = parts[0].trim();
-            let value = parts.get(1).map(|v| v.trim());
+        for part in split_options(s) {
+            let (key, value) = match part.split_once('=') {
+                Some((key, value)) => (key.trim(), Some(value.trim())),
+                None => (part.trim(), None),
+            };
 
             match key {
                 "default" | "d" => is_default = true,
@@ -1269,6 +1300,46 @@ mod tests {
     fn test_channel_info_refuses_an_overlong_name() {
         let result: Result<ChannelInfo, _> = "name=EsteNombreEsDemasiadoLargo".parse();
         assert!(result.unwrap_err().contains("maximum is 12"));
+    }
+
+    #[test]
+    fn test_split_options_separates_on_commas() {
+        assert_eq!(split_options("a,b,c"), vec!["a", "b", "c"]);
+        assert_eq!(split_options("single"), vec!["single"]);
+    }
+
+    #[test]
+    fn test_split_options_honours_escaped_commas() {
+        assert_eq!(split_options(r"a\,b"), vec!["a,b"]);
+        assert_eq!(
+            split_options(r"name=A\,B,uplink"),
+            vec!["name=A,B", "uplink"]
+        );
+    }
+
+    #[test]
+    fn test_split_options_leaves_other_backslashes_alone() {
+        assert_eq!(split_options(r"a\b"), vec![r"a\b"]);
+        assert_eq!(split_options("trailing\\"), vec!["trailing\\"]);
+    }
+
+    #[test]
+    fn test_channel_name_can_contain_a_comma() {
+        let channel: ChannelInfo = r"name=A\,B".parse().unwrap();
+        assert_eq!(channel.name, "A,B");
+    }
+
+    #[test]
+    fn test_passphrase_can_contain_a_comma() {
+        let channel: ChannelInfo = r"psk_passphrase=one\, two".parse().unwrap();
+        assert_eq!(channel.psk, hash_phrase_to_psk("one, two"));
+    }
+
+    #[test]
+    fn test_an_unescaped_comma_still_starts_a_new_option() {
+        let channel: ChannelInfo = "name=Test,uplink".parse().unwrap();
+        assert_eq!(channel.name, "Test");
+        assert!(channel.uplink_enabled);
     }
 
     #[test]

@@ -9,8 +9,15 @@ use meshurl::{
 
 #[derive(Parser, Debug)]
 #[command(name = "meshurl")]
+#[command(version)]
 #[command(about = "Decode and encode Meshtastic channel URLs")]
-enum Cli {
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum Command {
     #[command(about = "Decode a Meshtastic channel URL")]
     Decode { url: String },
 
@@ -42,6 +49,7 @@ impl EncodeArgs {
   meshurl encode -c 'name=Galicia,psk_passphrase=my secret phrase'
   meshurl encode -c 'name=Private,psk_base64=CcZBoFJbADMGEoSkkYPA3Ha23rr7WPcyUo1AjorGQIA='
   meshurl encode -c 'uplink,downlink,pos=32' -c 'name=Iberia,uplink,downlink'
+  meshurl encode -c 'name=A\,B'   (escape a comma with \, to keep it in a value)
 
 PSK Modes:
   psk_mode=default  - Use the default (weak) key
@@ -197,20 +205,11 @@ fn restore_sigpipe_default() {}
 fn main() {
     restore_sigpipe_default();
 
-    let args: Vec<String> = std::env::args().collect();
-
-    if args.len() == 1 {
-        if let Err(e) = tui::run() {
-            eprintln!("TUI Error: {}", e);
-            std::process::exit(1);
-        }
-        return;
-    }
-
-    let cli = Cli::parse();
-
-    match cli {
-        Cli::Decode { url } => match decode_url(&url) {
+    // No subcommand opens the TUI, which is also what `tui` asks for. Letting
+    // clap decide that keeps the argument count out of it, and lets --help and
+    // --version work on their own.
+    match Cli::parse().command {
+        Some(Command::Decode { url }) => match decode_url(&url) {
             Ok(meshurl::DecodeResult::Channel(config)) => {
                 formatter::print_config(&config);
             }
@@ -222,7 +221,7 @@ fn main() {
                 std::process::exit(1);
             }
         },
-        Cli::Encode(args) => match encode_config(&args) {
+        Some(Command::Encode(args)) => match encode_config(&args) {
             Ok((config, short_url, full_url)) => {
                 formatter::print_encoded(&config, &short_url, &full_url);
             }
@@ -231,7 +230,7 @@ fn main() {
                 std::process::exit(1);
             }
         },
-        Cli::Tui => {
+        Some(Command::Tui) | None => {
             if let Err(e) = tui::run() {
                 eprintln!("TUI Error: {}", e);
                 std::process::exit(1);

@@ -241,10 +241,7 @@ pub fn draw_decode_mode(f: &mut Frame, state: &mut DecodeDrawState) {
     f.render_widget(footer, chunks[4]);
 }
 
-pub fn handle_decode_keys(
-    key: ratatui::crossterm::event::KeyEvent,
-    state: &mut DecodeState,
-) -> bool {
+pub fn handle_decode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut DecodeState) {
     use ratatui::crossterm::event::KeyCode;
 
     match key.code {
@@ -255,13 +252,11 @@ pub fn handle_decode_keys(
             *state.lora_scroll = 0;
             *state.lora_max_scroll = 0;
             state.channels_list_state.select(None);
-            true
         }
         KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Left | KeyCode::Right => {
             if *state.editing_url {
                 state.textarea.input(key);
             }
-            false
         }
         KeyCode::Up => {
             if *state.active_panel == ActivePanel::Channels {
@@ -279,7 +274,6 @@ pub fn handle_decode_keys(
                     .saturating_sub(1)
                     .min(*state.lora_max_scroll);
             }
-            false
         }
         KeyCode::Down => {
             if *state.active_panel == ActivePanel::Channels {
@@ -294,7 +288,6 @@ pub fn handle_decode_keys(
             } else if *state.active_panel == ActivePanel::Lora {
                 *state.lora_scroll = (*state.lora_scroll + 1).min(*state.lora_max_scroll);
             }
-            false
         }
         KeyCode::Enter => {
             if *state.editing_url {
@@ -313,9 +306,8 @@ pub fn handle_decode_keys(
             } else {
                 *state.editing_url = true;
             }
-            false
         }
-        _ => false,
+        _ => {}
     }
 }
 

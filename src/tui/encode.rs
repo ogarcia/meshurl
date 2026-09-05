@@ -774,10 +774,7 @@ pub fn copy_to_clipboard(text: &str) -> Result<CopyMethod, String> {
     Err("Failed to copy. Install wl-clipboard or xclip".to_string())
 }
 
-pub fn handle_encode_keys(
-    key: ratatui::crossterm::event::KeyEvent,
-    state: &mut EncodeState,
-) -> bool {
+pub fn handle_encode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut EncodeState) {
     use ratatui::crossterm::event::KeyCode;
 
     if state.lora_popup.is_some() {
@@ -801,7 +798,7 @@ pub fn handle_encode_keys(
                 }
             }
         }
-        return true;
+        return;
     }
 
     if state.channel_popup.is_some() {
@@ -809,7 +806,7 @@ pub fn handle_encode_keys(
 
         if popup.editing_psk && matches!(key.code, KeyCode::Esc) {
             popup.cancel_editing_psk();
-            return true;
+            return;
         }
 
         let result = handle_popup_keys(key, popup, state.toast);
@@ -851,7 +848,7 @@ pub fn handle_encode_keys(
                 }
             }
         }
-        return true;
+        return;
     }
 
     match key.code {
@@ -869,7 +866,6 @@ pub fn handle_encode_keys(
                 };
                 *state.toast = Some(ToastMessage::new(text, is_ok, is_uncertain));
             }
-            true
         }
         KeyCode::Delete => {
             state.encode_config.channels.clear();
@@ -879,13 +875,11 @@ pub fn handle_encode_keys(
             *state.lora_scroll = 0;
             *state.lora_popup = None;
             *state.channel_popup = None;
-            true
         }
         KeyCode::Char('a') | KeyCode::Char('A') => {
             if state.encode_config.channels.len() < MAX_CHANNELS {
                 *state.channel_popup = Some(ChannelPopupState::new());
             }
-            true
         }
         KeyCode::Enter => {
             if let Some(selected) = state
@@ -896,7 +890,6 @@ pub fn handle_encode_keys(
                 let channel = &state.encode_config.channels[selected];
                 *state.channel_popup = Some(ChannelPopupState::from_channel(selected, channel));
             }
-            true
         }
         KeyCode::Char('+') => {
             // `s + 1 < len` rather than `s < len - 1`: the latter underflows on
@@ -910,7 +903,6 @@ pub fn handle_encode_keys(
                 reindex_channels(&mut state.encode_config.channels);
                 state.encode_channels_state.select(Some(idx + 1));
             }
-            false
         }
         KeyCode::Char('-') => {
             if let Some(idx) = state
@@ -922,7 +914,6 @@ pub fn handle_encode_keys(
                 reindex_channels(&mut state.encode_config.channels);
                 state.encode_channels_state.select(Some(idx - 1));
             }
-            false
         }
         KeyCode::Char('d') | KeyCode::Char('D') => {
             if let Some(selected) = state
@@ -940,14 +931,12 @@ pub fn handle_encode_keys(
                         .select(Some(state.encode_config.channels.len() - 1));
                 }
             }
-            false
         }
         KeyCode::Char('e') | KeyCode::Char('E') => {
             *state.lora_popup = Some(match &state.encode_config.lora {
                 Some(lora) => LoRaPopupState::from_lora(lora),
                 None => LoRaPopupState::new(),
             });
-            true
         }
         KeyCode::Char('g') | KeyCode::Char('G') => {
             if !state.encode_config.channels.is_empty() {
@@ -956,7 +945,6 @@ pub fn handle_encode_keys(
                     Err(e) => *state.encoded_url = Some(format!("Error: {}", e)),
                 }
             }
-            true
         }
         KeyCode::Up => {
             if *state.active_panel == ActivePanel::Channels {
@@ -968,7 +956,6 @@ pub fn handle_encode_keys(
             } else if *state.active_panel == ActivePanel::Lora {
                 *state.lora_scroll = state.lora_scroll.saturating_sub(1);
             }
-            false
         }
         KeyCode::Down => {
             if *state.active_panel == ActivePanel::Channels {
@@ -980,9 +967,8 @@ pub fn handle_encode_keys(
             } else if *state.active_panel == ActivePanel::Lora {
                 *state.lora_scroll = (*state.lora_scroll + 1).min(*state.lora_max_scroll);
             }
-            false
         }
-        _ => false,
+        _ => {}
     }
 }
 
