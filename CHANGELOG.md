@@ -35,6 +35,13 @@ the fidelity of what is encoded and displayed.
   lose the value on the way back out.
 - The 2.4 GHz band (`LORA_24`) now gets the wider bandwidths the firmware uses
   there, instead of the narrow band figures.
+- Enter on the Region or Modem field of the LoRa popup opens a list of every
+  value, rather than making them be cycled through one arrow press at a time.
+  The modem list shows each preset's bandwidth, spreading factor and coding
+  rate.
+- Saving a LoRa configuration moves the region to the one its preset requires,
+  as the firmware does: choosing NarrowFast on EU_868 saves as EU_N_868. The
+  change is reported in a toast.
 - The TUI decodes node (`/v/`) URLs, which it used to refuse.
 - The LoRa popup exposes bandwidth, spreading factor and coding rate for manual
   configurations, and offers `Custom` alongside the presets.

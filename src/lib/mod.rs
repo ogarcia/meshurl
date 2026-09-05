@@ -29,6 +29,7 @@ pub mod encoder;
 pub mod errors;
 pub mod models;
 pub mod protobufs;
+pub mod regions;
 
 pub use decoder::{DecodeResult, decode_url};
 pub use encoder::{
@@ -42,3 +43,4 @@ pub use models::{
     MeshtasticDisplay, ModemConfig, NodeInfo, POSITION_OPTIONS, PskMode, PskType, REGION_CODES,
     generate_random_psk, get_preset_params, hash_phrase_to_psk, validate_channel_name,
 };
+pub use regions::{presets_for_region, region_supports_preset, region_swap_for_preset};

@@ -5,9 +5,10 @@ use meshurl::models::{
     MeshtasticDisplay, ModemConfig, POSITION_OPTIONS, PskType, REGION_CODES, generate_random_psk,
     get_preset_params, hash_phrase_to_psk, validate_channel_name,
 };
+use meshurl::regions::region_swap_for_preset;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Paragraph},
@@ -29,6 +30,9 @@ const MAX_CHANNELS: usize = 8;
 const CHANNEL_POPUP_WIDTH: u16 = 35;
 /// Preferred width of the LoRa editing popup.
 const LORA_POPUP_WIDTH: u16 = 40;
+/// Preferred size of the list overlay that picks a region or modem.
+const LIST_POPUP_WIDTH: u16 = 44;
+const LIST_POPUP_MAX_HEIGHT: u16 = 20;
 /// Preferred size of the single-line input overlays.
 const INPUT_OVERLAY_WIDTH: u16 = 40;
 const INPUT_OVERLAY_HEIGHT: u16 = 3;
@@ -139,6 +143,70 @@ impl ModemChoice {
     }
 }
 
+/// The field a list overlay is choosing a value for.
+///
+/// Cycling with the arrow keys is fine for a handful of options, but there are
+/// 37 regions: the overlay shows them all at once so one can be found by eye.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListChoice {
+    Region,
+    Modem,
+}
+
+/// An open list overlay and the entry highlighted in it.
+pub struct ListPopupState {
+    pub choice: ListChoice,
+    pub selected: usize,
+}
+
+impl ListPopupState {
+    /// Opens the list on the value currently in use.
+    fn new(choice: ListChoice, current: usize) -> Self {
+        Self {
+            choice,
+            selected: current,
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self.choice {
+            ListChoice::Region => REGION_CODES.len(),
+            ListChoice::Modem => ModemChoice::all().len(),
+        }
+    }
+
+    /// The entries to show, as (name, extra detail).
+    fn entries(&self) -> Vec<(String, String)> {
+        match self.choice {
+            ListChoice::Region => REGION_CODES
+                .iter()
+                .map(|region| (region.to_mesh_string().to_string(), String::new()))
+                .collect(),
+            ListChoice::Modem => ModemChoice::all()
+                .iter()
+                .map(|choice| {
+                    let detail = match choice {
+                        ModemChoice::Preset(preset) => {
+                            let (bandwidth, spread_factor, coding_rate) =
+                                get_preset_params(*preset, RegionCode::Eu868);
+                            format!("{} kHz  SF{}  4/{}", bandwidth, spread_factor, coding_rate)
+                        }
+                        ModemChoice::Custom => "set by hand".to_string(),
+                    };
+                    (choice.name().to_string(), detail)
+                })
+                .collect(),
+        }
+    }
+
+    fn title(&self) -> &'static str {
+        match self.choice {
+            ListChoice::Region => " Region ",
+            ListChoice::Modem => " Modem ",
+        }
+    }
+}
+
 pub struct LoRaPopupState {
     pub region: RegionCode,
     /// The modem entry being shown: a preset, or the manual option.
@@ -160,6 +228,8 @@ pub struct LoRaPopupState {
     pub ignore_mqtt: bool,
     pub ok_mqtt: bool,
     pub selected_field: usize,
+    /// The list overlay, when one is open.
+    pub list_popup: Option<ListPopupState>,
 }
 
 impl LoRaPopupState {
@@ -185,6 +255,7 @@ impl LoRaPopupState {
             ignore_mqtt: false,
             ok_mqtt: false,
             selected_field: 0,
+            list_popup: None,
         }
     }
 
@@ -214,7 +285,37 @@ impl LoRaPopupState {
             ignore_mqtt: lora.ignore_mqtt,
             ok_mqtt: lora.config_ok_to_mqtt,
             selected_field: 0,
+            list_popup: None,
         }
+    }
+
+    /// The region this configuration will actually use.
+    ///
+    /// A preset locked to a sibling EU region means the user wants that
+    /// region: choosing NarrowFast while on EU_868 means EU_N_868, which is
+    /// what the firmware does when it is handed the pair.
+    pub fn effective_region(&self) -> RegionCode {
+        match self.modem_choice {
+            ModemChoice::Preset(preset) => {
+                region_swap_for_preset(self.region, preset).unwrap_or(self.region)
+            }
+            ModemChoice::Custom => self.region,
+        }
+    }
+
+    /// Applies a modem choice, seeding the manual fields from the preset so
+    /// switching to Custom starts somewhere sane.
+    fn select_modem(&mut self, choice: ModemChoice) {
+        self.modem_choice = choice;
+        if let ModemChoice::Preset(preset) = choice {
+            let (bandwidth, spread_factor, coding_rate) = get_preset_params(preset, self.region);
+            self.bandwidth = bandwidth.round() as u32;
+            self.spread_factor = spread_factor;
+            self.coding_rate = coding_rate;
+        }
+        self.selected_field = self
+            .selected_field
+            .min(lora_fields(self.modem_choice).len().saturating_sub(1));
     }
 
     pub fn to_lora_info(&self) -> LoRaInfo {
@@ -228,7 +329,7 @@ impl LoRaPopupState {
         };
 
         LoRaInfo {
-            region: self.region,
+            region: self.effective_region(),
             modem,
             tx_enabled: self.tx_enabled,
             tx_power: self.tx_power,
@@ -704,6 +805,10 @@ pub fn draw_encode_mode(f: &mut Frame, state: &mut EncodeDrawState) {
 
     if let Some(lora_state) = state.lora_popup {
         draw_lora_popup(f, lora_state, f.area());
+
+        if let Some(list_state) = &lora_state.list_popup {
+            draw_list_popup(f, list_state, f.area());
+        }
     }
 }
 
@@ -781,7 +886,7 @@ pub fn handle_encode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut 
     if state.lora_popup.is_some() {
         let popup = state.lora_popup.as_mut().unwrap();
 
-        let result = handle_lora_popup_keys(key, popup);
+        let result = handle_lora_popup_keys(key, popup, state.toast);
 
         match result {
             Some(lora_info) => {
@@ -1229,11 +1334,93 @@ pub fn draw_lora_popup(f: &mut Frame, state: &LoRaPopupState, area: ratatui::lay
     f.render_widget(list, inner);
 }
 
+/// Draws the list overlay for the region or modem field.
+///
+/// The list scrolls to keep the highlighted entry visible, so a region near the
+/// end of 37 is still reachable on a short terminal.
+pub fn draw_list_popup(f: &mut Frame, state: &ListPopupState, area: Rect) {
+    let entries = state.entries();
+    let height = (entries.len() as u16 + 2).min(LIST_POPUP_MAX_HEIGHT);
+    let Some(popup_rect) = centered_popup(area, LIST_POPUP_WIDTH, height) else {
+        return;
+    };
+
+    f.render_widget(Clear, popup_rect);
+
+    let block = Block::default()
+        .title(state.title())
+        .title_bottom(Line::from(" [↑↓] Select  [Enter] Choose  [Esc] Back ").centered())
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Green))
+        .title_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        );
+
+    let items: Vec<ListItem> = entries
+        .iter()
+        .map(|(name, detail)| {
+            let mut spans = vec![Span::raw(format!(" {}", name))];
+            if !detail.is_empty() {
+                spans.push(Span::styled(
+                    format!("  {}", detail),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+            ListItem::new(Line::from(spans))
+        })
+        .collect();
+
+    let list = List::new(items).block(block).highlight_style(
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(ratatui::style::Modifier::BOLD),
+    );
+
+    let mut list_state = ListState::default();
+    list_state.select(Some(state.selected));
+    f.render_stateful_widget(list, popup_rect, &mut list_state);
+}
+
 pub fn handle_lora_popup_keys(
     key: ratatui::crossterm::event::KeyEvent,
     state: &mut LoRaPopupState,
+    toast: &mut Option<ToastMessage>,
 ) -> Option<LoRaInfo> {
     use ratatui::crossterm::event::KeyCode;
+
+    // The list overlay owns the keyboard while it is open.
+    if let Some(list) = state.list_popup.as_mut() {
+        match key.code {
+            KeyCode::Up => {
+                list.selected = list.selected.saturating_sub(1);
+            }
+            KeyCode::Down => {
+                list.selected = (list.selected + 1).min(list.len().saturating_sub(1));
+            }
+            KeyCode::Home => list.selected = 0,
+            KeyCode::End => list.selected = list.len().saturating_sub(1),
+            KeyCode::Enter => {
+                let list = state.list_popup.take().expect("the overlay is open");
+                match list.choice {
+                    ListChoice::Region => {
+                        if let Some(region) = REGION_CODES.get(list.selected) {
+                            state.region = *region;
+                        }
+                    }
+                    ListChoice::Modem => {
+                        if let Some(choice) = ModemChoice::all().get(list.selected) {
+                            state.select_modem(*choice);
+                        }
+                    }
+                }
+            }
+            KeyCode::Esc => state.list_popup = None,
+            _ => {}
+        }
+        return None;
+    }
 
     let is_enter = matches!(key.code, KeyCode::Enter);
     let cycle_forward = matches!(key.code, KeyCode::Right | KeyCode::Char(' '));
@@ -1273,7 +1460,19 @@ pub fn handle_lora_popup_keys(
             match field {
                 "Save" => {
                     if is_enter {
-                        return Some(state.to_lora_info());
+                        let lora = state.to_lora_info();
+                        if lora.region != state.region {
+                            show_toast(
+                                toast,
+                                &format!(
+                                    "Region set to {} for {}",
+                                    lora.region.to_mesh_string(),
+                                    state.modem_choice.name()
+                                ),
+                                true,
+                            );
+                        }
+                        return Some(lora);
                     }
                     None
                 }
@@ -1281,26 +1480,27 @@ pub fn handle_lora_popup_keys(
                 "Region" => {
                     if cycle_forward || cycle_backward {
                         state.region = cycle_through(REGION_CODES, state.region, cycle_forward);
+                    } else if is_enter {
+                        let current = REGION_CODES
+                            .iter()
+                            .position(|region| *region == state.region)
+                            .unwrap_or(0);
+                        state.list_popup = Some(ListPopupState::new(ListChoice::Region, current));
                     }
                     None
                 }
                 "Modem" => {
                     if cycle_forward || cycle_backward {
                         let choices = ModemChoice::all();
-                        state.modem_choice =
-                            cycle_through(&choices, state.modem_choice, cycle_forward);
-                        // Seed the manual fields from the preset that was on
-                        // screen, so switching to Custom starts somewhere sane.
-                        if let ModemChoice::Preset(preset) = state.modem_choice {
-                            let (bandwidth, spread_factor, coding_rate) =
-                                get_preset_params(preset, state.region);
-                            state.bandwidth = bandwidth.round() as u32;
-                            state.spread_factor = spread_factor;
-                            state.coding_rate = coding_rate;
-                        }
-                        state.selected_field = state
-                            .selected_field
-                            .min(lora_fields(state.modem_choice).len().saturating_sub(1));
+                        let next = cycle_through(&choices, state.modem_choice, cycle_forward);
+                        state.select_modem(next);
+                    } else if is_enter {
+                        let choices = ModemChoice::all();
+                        let current = choices
+                            .iter()
+                            .position(|choice| *choice == state.modem_choice)
+                            .unwrap_or(0);
+                        state.list_popup = Some(ListPopupState::new(ListChoice::Modem, current));
                     }
                     None
                 }
@@ -1599,6 +1799,7 @@ mod tests {
     use super::*;
     use crate::tui::app::ActivePanel;
     use meshurl::models::MeshtasticConfig;
+    use meshurl::regions::presets_for_region;
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
     use ratatui::{Terminal, backend::TestBackend};
 
@@ -1994,9 +2195,18 @@ mod tests {
         }
 
         #[test]
-        fn a_tool_that_ignores_its_input_still_succeeds() {
-            // Closing the pipe early must not be mistaken for a failure.
-            assert!(copy_with_tool("true", &[], "text"));
+        fn a_long_url_is_written_whole() {
+            // A configuration with eight channels makes for a long URL; a
+            // partial write would produce a subtly wrong one.
+            let file = std::env::temp_dir().join("meshurl-clipboard-long-test");
+            let script = format!("cat > {}", file.display());
+            let text = "https://meshtastic.org/e/#".to_string() + &"A".repeat(4096);
+
+            assert!(copy_with_tool("sh", &["-c", &script], &text));
+
+            let written = std::fs::read_to_string(&file).expect("the stand-in wrote the file");
+            let _ = std::fs::remove_file(&file);
+            assert_eq!(written, text);
         }
 
         #[test]
@@ -2137,6 +2347,166 @@ mod tests {
         assert_eq!(lora.modem.name(), "Custom");
     }
 
+    fn lora_key(popup: &mut LoRaPopupState, code: KeyCode) -> Option<LoRaInfo> {
+        handle_lora_popup_keys(KeyEvent::from(code), popup, &mut None)
+    }
+
+    /// Moves the LoRa popup selection onto the named field.
+    fn focus_lora_field(popup: &mut LoRaPopupState, field: &str) {
+        popup.selected_field = lora_fields(popup.modem_choice)
+            .iter()
+            .position(|candidate| *candidate == field)
+            .unwrap_or_else(|| panic!("{} is not a LoRa field", field));
+    }
+
+    #[test]
+    fn enter_opens_the_region_list() {
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "Region");
+
+        lora_key(&mut popup, KeyCode::Enter);
+
+        let list = popup.list_popup.as_ref().expect("the list opened");
+        assert_eq!(list.choice, ListChoice::Region);
+        // It opens on the region in use, not at the top.
+        assert_eq!(REGION_CODES[list.selected], RegionCode::Eu868);
+    }
+
+    #[test]
+    fn the_region_list_picks_a_value() {
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "Region");
+        lora_key(&mut popup, KeyCode::Enter);
+
+        lora_key(&mut popup, KeyCode::Home);
+        lora_key(&mut popup, KeyCode::Enter);
+
+        assert!(popup.list_popup.is_none());
+        assert_eq!(popup.region, REGION_CODES[0]);
+    }
+
+    #[test]
+    fn the_region_list_reaches_the_last_entry() {
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "Region");
+        lora_key(&mut popup, KeyCode::Enter);
+
+        lora_key(&mut popup, KeyCode::End);
+        lora_key(&mut popup, KeyCode::Enter);
+
+        assert_eq!(popup.region, REGION_CODES[REGION_CODES.len() - 1]);
+    }
+
+    #[test]
+    fn the_list_selection_stays_in_range() {
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "Region");
+        lora_key(&mut popup, KeyCode::Enter);
+
+        for _ in 0..REGION_CODES.len() + 10 {
+            lora_key(&mut popup, KeyCode::Down);
+        }
+        let list = popup.list_popup.as_ref().expect("still open");
+        assert_eq!(list.selected, REGION_CODES.len() - 1);
+
+        for _ in 0..REGION_CODES.len() + 10 {
+            lora_key(&mut popup, KeyCode::Up);
+        }
+        assert_eq!(popup.list_popup.as_ref().unwrap().selected, 0);
+    }
+
+    #[test]
+    fn esc_closes_the_list_without_choosing() {
+        let mut popup = LoRaPopupState::new();
+        let before = popup.region;
+        focus_lora_field(&mut popup, "Region");
+        lora_key(&mut popup, KeyCode::Enter);
+        lora_key(&mut popup, KeyCode::Down);
+
+        lora_key(&mut popup, KeyCode::Esc);
+
+        assert!(popup.list_popup.is_none());
+        assert_eq!(popup.region, before);
+    }
+
+    #[test]
+    fn enter_opens_the_modem_list_and_picks_from_it() {
+        let mut popup = LoRaPopupState::new();
+        focus_lora_field(&mut popup, "Modem");
+
+        lora_key(&mut popup, KeyCode::Enter);
+        let list = popup.list_popup.as_ref().expect("the list opened");
+        assert_eq!(list.choice, ListChoice::Modem);
+
+        // The last entry is the manual one.
+        lora_key(&mut popup, KeyCode::End);
+        lora_key(&mut popup, KeyCode::Enter);
+
+        assert_eq!(popup.modem_choice, ModemChoice::Custom);
+    }
+
+    #[test]
+    fn the_modem_list_shows_the_radio_parameters() {
+        let list = ListPopupState::new(ListChoice::Modem, 0);
+        let entries = list.entries();
+
+        let (name, detail) = entries
+            .iter()
+            .find(|(name, _)| name == "NARROW_FAST")
+            .expect("NarrowFast is offered");
+        assert_eq!(name, "NARROW_FAST");
+        assert_eq!(detail, "62.5 kHz  SF7  4/6");
+    }
+
+    #[test]
+    fn saving_moves_the_region_to_the_one_the_preset_needs() {
+        // The case that prompted this: NarrowFast belongs to EU_N_868.
+        let mut popup = LoRaPopupState::new();
+        assert_eq!(popup.region, RegionCode::Eu868);
+        popup.select_modem(ModemChoice::Preset(ModemPreset::NarrowFast));
+
+        let lora = popup.to_lora_info();
+
+        assert_eq!(lora.region, RegionCode::EuN868);
+        assert_eq!(lora.modem, ModemConfig::Preset(ModemPreset::NarrowFast));
+    }
+
+    #[test]
+    fn saving_reports_the_region_change() {
+        let mut popup = LoRaPopupState::new();
+        popup.select_modem(ModemChoice::Preset(ModemPreset::LiteFast));
+        focus_lora_field(&mut popup, "Save");
+
+        let mut toast = None;
+        let saved = handle_lora_popup_keys(KeyEvent::from(KeyCode::Enter), &mut popup, &mut toast);
+
+        assert_eq!(saved.expect("saved").region, RegionCode::Eu866);
+        let toast = toast.expect("the change is reported");
+        assert!(toast.text.contains("EU_866"), "toast was: {}", toast.text);
+    }
+
+    #[test]
+    fn saving_leaves_a_legal_pairing_alone() {
+        let mut popup = LoRaPopupState::new();
+        popup.select_modem(ModemChoice::Preset(ModemPreset::LongFast));
+        focus_lora_field(&mut popup, "Save");
+
+        let mut toast = None;
+        let saved = handle_lora_popup_keys(KeyEvent::from(KeyCode::Enter), &mut popup, &mut toast);
+
+        assert_eq!(saved.expect("saved").region, RegionCode::Eu868);
+        assert!(toast.is_none(), "nothing to report");
+    }
+
+    #[test]
+    fn a_manual_configuration_keeps_its_region() {
+        // Only presets carry a region requirement.
+        let mut popup = LoRaPopupState::new();
+        popup.select_modem(ModemChoice::Custom);
+
+        assert_eq!(popup.to_lora_info().region, RegionCode::Eu868);
+    }
+
     #[test]
     fn a_region_survives_the_popup_round_trip() {
         // Editing the LoRa config used to run the region through its name, so
@@ -2144,6 +2514,9 @@ mod tests {
         for region in REGION_CODES {
             let mut lora = LoRaPopupState::new().to_lora_info();
             lora.region = *region;
+            // Pair it with a preset the region allows, or saving would move
+            // the region to the one the preset belongs to.
+            lora.modem = ModemConfig::Preset(presets_for_region(*region)[0]);
 
             let reopened = LoRaPopupState::from_lora(&lora).to_lora_info();
 
