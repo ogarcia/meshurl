@@ -823,10 +823,8 @@ name = "meshurl"
 version = "0.4.1"
 dependencies = [
  "base64 0.23.1",
- "bytes",
  "clap",
  "colored",
- "crossterm",
  "getrandom 0.4.3",
  "meshtastic_protobufs",
  "prost",
