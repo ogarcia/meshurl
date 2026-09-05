@@ -1,8 +1,8 @@
 use base64::Engine;
 use meshurl::encoder::{encode_url, modem_preset_from_str, region_code_from_str};
 use meshurl::models::{
-    ChannelInfo, ChannelRole, DEFAULT_PSK, LoRaInfo, MeshtasticDisplay, POSITION_OPTIONS, PskMode,
-    PskType, generate_random_psk, get_preset_params, hash_phrase_to_psk,
+    ChannelInfo, ChannelRole, DEFAULT_PSK, LoRaInfo, MeshtasticDisplay, POSITION_OPTIONS, PskType,
+    generate_random_psk, get_preset_params, hash_phrase_to_psk,
 };
 use ratatui::{
     Frame,
@@ -31,10 +31,68 @@ const INPUT_OVERLAY_HEIGHT: u16 = 3;
 /// Columns a popup field value may occupy before it is shortened.
 const POPUP_VALUE_COLUMNS: usize = 22;
 
+/// PSK mode as offered by the channel popup.
+///
+/// The library's [`PskMode`] carries the key material inside the variant, which
+/// suits the CLI parser (`psk_mode=base64:...`) but leaves the popup with two
+/// places holding the same value. They drifted apart: editing wrote to
+/// `psk_value` while the channel was built from the enum payload, so every PSK
+/// typed into the TUI was silently dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PskModeKind {
+    Default,
+    None,
+    Random,
+    Base64,
+    Passphrase,
+}
+
+impl PskModeKind {
+    /// Modes in the order the popup cycles through them.
+    const ALL: &'static [PskModeKind] = &[
+        PskModeKind::Default,
+        PskModeKind::None,
+        PskModeKind::Random,
+        PskModeKind::Base64,
+        PskModeKind::Passphrase,
+    ];
+
+    /// Whether the mode needs the user to supply a value.
+    fn needs_value(self) -> bool {
+        matches!(self, PskModeKind::Base64 | PskModeKind::Passphrase)
+    }
+
+    /// Returns the next or previous mode, wrapping around.
+    fn cycle(self, forward: bool) -> Self {
+        let modes = Self::ALL;
+        let current = modes.iter().position(|m| *m == self).unwrap_or(0);
+        let len = modes.len();
+        let next = if forward {
+            (current + 1) % len
+        } else {
+            (current + len - 1) % len
+        };
+        modes[next]
+    }
+}
+
+impl std::fmt::Display for PskModeKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            PskModeKind::Default => "Default",
+            PskModeKind::None => "None",
+            PskModeKind::Random => "Random",
+            PskModeKind::Base64 => "Base64",
+            PskModeKind::Passphrase => "Passphrase",
+        };
+        write!(f, "{}", name)
+    }
+}
+
 pub struct ChannelPopupState {
     pub channel_index: Option<usize>,
     pub name: String,
-    pub psk_mode: PskMode,
+    pub psk_mode: PskModeKind,
     pub psk_value: String,
     pub uplink_enabled: bool,
     pub downlink_enabled: bool,
@@ -181,7 +239,7 @@ impl ChannelPopupState {
         Self {
             channel_index: None,
             name: String::new(),
-            psk_mode: PskMode::Default,
+            psk_mode: PskModeKind::Default,
             psk_value: String::new(),
             uplink_enabled: false,
             downlink_enabled: false,
@@ -197,12 +255,11 @@ impl ChannelPopupState {
 
     pub fn from_channel(index: usize, channel: &ChannelInfo) -> Self {
         let (psk_mode, psk_value) = if channel.psk.is_empty() {
-            (PskMode::None, String::new())
+            (PskModeKind::None, String::new())
         } else if channel.psk == DEFAULT_PSK {
-            (PskMode::Default, String::new())
+            (PskModeKind::Default, String::new())
         } else {
-            let psk = channel.psk.clone();
-            (PskMode::Base64(psk.clone()), psk)
+            (PskModeKind::Base64, channel.psk.clone())
         };
 
         let name_textarea = TextArea::default();
@@ -257,59 +314,44 @@ impl ChannelPopupState {
         self.psk_textarea.move_cursor(CursorMove::End);
     }
 
-    pub fn finish_editing_psk(&mut self) {
-        self.psk_value = self
-            .psk_textarea
-            .lines()
-            .first()
-            .map_or(String::new(), |l| l.to_string());
-        self.editing_psk = false;
-    }
-
     pub fn cancel_editing_psk(&mut self) {
         self.psk_textarea = TextArea::default();
         self.editing_psk = false;
     }
 
-    pub fn to_channel_info(&self, default_index: usize) -> (usize, ChannelInfo) {
-        use base64::engine::general_purpose::STANDARD;
+    /// Resolves the selected mode and entered value into a channel PSK.
+    ///
+    /// Invalid or missing key material is reported instead of being replaced by
+    /// a fallback: silently falling back to the default PSK would hand the user
+    /// the well-known public key while the popup claimed their own was in use.
+    fn resolve_psk(&self) -> Result<(String, PskType), String> {
+        match self.psk_mode {
+            PskModeKind::Default => Ok((DEFAULT_PSK.to_string(), PskType::Default)),
+            PskModeKind::None => Ok((String::new(), PskType::None)),
+            PskModeKind::Random => Ok((generate_random_psk(), PskType::Aes256)),
+            PskModeKind::Base64 => {
+                let psk = self.psk_value.trim();
+                if psk.is_empty() {
+                    return Err("Enter a base64 PSK first".to_string());
+                }
+
+                let bytes = decode_base64_psk(psk)?;
+                Ok((psk.to_string(), PskType::from_bytes(&bytes)))
+            }
+            PskModeKind::Passphrase => {
+                if self.psk_value.is_empty() {
+                    return Err("Enter a passphrase first".to_string());
+                }
+                Ok((hash_phrase_to_psk(&self.psk_value), PskType::Aes256))
+            }
+        }
+    }
+
+    pub fn to_channel_info(&self, default_index: usize) -> Result<(usize, ChannelInfo), String> {
         let index = self.channel_index.unwrap_or(default_index);
+        let (psk, psk_type) = self.resolve_psk()?;
 
-        let (psk, psk_type) = match &self.psk_mode {
-            PskMode::Default => (DEFAULT_PSK.to_string(), PskType::Default),
-            PskMode::None => (String::new(), PskType::None),
-            PskMode::Random => {
-                let psk = generate_random_psk();
-                (psk, PskType::Aes256)
-            }
-            PskMode::Base64(psk_str) => {
-                let psk = if psk_str.is_empty() {
-                    String::new()
-                } else {
-                    match STANDARD.decode(psk_str) {
-                        Ok(bytes) if bytes.len() == 16 || bytes.len() == 32 => psk_str.clone(),
-                        _ => DEFAULT_PSK.to_string(),
-                    }
-                };
-                let psk_type = if psk.is_empty() {
-                    PskType::None
-                } else if psk == DEFAULT_PSK {
-                    PskType::Default
-                } else {
-                    match STANDARD.decode(&psk) {
-                        Ok(bytes) => PskType::from_bytes(&bytes),
-                        Err(_) => PskType::Unknown,
-                    }
-                };
-                (psk, psk_type)
-            }
-            PskMode::Passphrase(phrase) => {
-                let psk = hash_phrase_to_psk(phrase);
-                (psk, PskType::Aes256)
-            }
-        };
-
-        (
+        Ok((
             index,
             ChannelInfo {
                 index,
@@ -326,7 +368,39 @@ impl ChannelPopupState {
                 position_precision: Some(POSITION_OPTIONS[self.position_index].1),
                 is_client_muted: self.muted,
             },
-        )
+        ))
+    }
+}
+
+/// Frames a toast is shown for.
+const TOAST_FRAMES: u8 = 120;
+
+/// Raises a toast, replacing whatever was on screen.
+fn show_toast(
+    toast: &mut Option<crate::tui::app::ToastMessage>,
+    toast_timer: &mut u8,
+    text: &str,
+    is_success: bool,
+) {
+    *toast = Some(crate::tui::app::ToastMessage {
+        text: text.to_string(),
+        is_success,
+        is_uncertain: false,
+    });
+    *toast_timer = TOAST_FRAMES;
+}
+
+/// Decodes a base64 PSK, checking it is a usable AES key length.
+fn decode_base64_psk(psk: &str) -> Result<Vec<u8>, String> {
+    use base64::engine::general_purpose::STANDARD;
+
+    let bytes = STANDARD
+        .decode(psk)
+        .map_err(|_| "Invalid base64 PSK".to_string())?;
+
+    match bytes.len() {
+        16 | 32 => Ok(bytes),
+        _ => Err("PSK must be 16 or 32 bytes".to_string()),
     }
 }
 
@@ -363,10 +437,10 @@ fn move_channel_selection(list_state: &mut ListState, len: usize, delta: isize) 
     list_state.select(Some(next));
 }
 
-fn get_popup_fields(psk_mode: &PskMode) -> Vec<&'static str> {
+fn get_popup_fields(psk_mode: PskModeKind) -> Vec<&'static str> {
     let mut fields = vec!["Name", "PSK Mode"];
 
-    if matches!(psk_mode, PskMode::Base64(_) | PskMode::Passphrase(_)) {
+    if psk_mode.needs_value() {
         fields.push("PSK");
     }
 
@@ -672,7 +746,7 @@ pub fn handle_encode_keys(
                 if key.code == KeyCode::Esc {
                     *state.channel_popup = None;
                 } else if key.code == KeyCode::Enter {
-                    let popup_fields = get_popup_fields(&popup.psk_mode);
+                    let popup_fields = get_popup_fields(popup.psk_mode);
                     let field = popup_fields[popup.selected_field];
                     if field == "Cancel" {
                         *state.channel_popup = None;
@@ -700,7 +774,7 @@ pub fn handle_encode_keys(
                     is_success: is_ok,
                     is_uncertain,
                 });
-                *state.toast_timer = 120;
+                *state.toast_timer = TOAST_FRAMES;
             }
             true
         }
@@ -854,7 +928,7 @@ pub fn handle_encode_tab(
 
 pub fn draw_channel_popup(f: &mut Frame, state: &ChannelPopupState) {
     let area = f.area();
-    let popup_fields = get_popup_fields(&state.psk_mode);
+    let popup_fields = get_popup_fields(state.psk_mode);
     let height = popup_fields.len() as u16 + 2;
     let popup_rect = match centered_popup(area, CHANNEL_POPUP_WIDTH, height) {
         Some(rect) => rect,
@@ -876,7 +950,7 @@ pub fn draw_channel_popup(f: &mut Frame, state: &ChannelPopupState) {
 
     let inner_rect = popup_rect.inner(ratatui::layout::Margin::new(1, 1));
 
-    let popup_fields = get_popup_fields(&state.psk_mode);
+    let popup_fields = get_popup_fields(state.psk_mode);
 
     for (i, field) in popup_fields.iter().enumerate() {
         let row_y = inner_rect.y + i as u16;
@@ -948,8 +1022,8 @@ pub fn draw_channel_popup(f: &mut Frame, state: &ChannelPopupState) {
         f.render_widget(Clear, overlay_rect);
 
         let psk_title = match state.psk_mode {
-            PskMode::Base64(_) => " PSK (base64) ",
-            PskMode::Passphrase(_) => " PSK (passphrase) ",
+            PskModeKind::Base64 => " PSK (base64) ",
+            PskModeKind::Passphrase => " PSK (passphrase) ",
             _ => " PSK ",
         };
 
@@ -1282,7 +1356,6 @@ pub fn handle_popup_keys(
     toast: &mut Option<crate::tui::app::ToastMessage>,
     toast_timer: &mut u8,
 ) -> Option<(usize, ChannelInfo)> {
-    use base64::engine::general_purpose::STANDARD;
     use ratatui::crossterm::event::KeyCode;
 
     if state.editing_name {
@@ -1294,45 +1367,25 @@ pub fn handle_popup_keys(
 
     if state.editing_psk {
         if matches!(key.code, KeyCode::Enter) {
-            if matches!(state.psk_mode, PskMode::Base64(_)) {
-                let psk_value = state
-                    .psk_textarea
-                    .lines()
-                    .first()
-                    .map_or(String::new(), |l| l.to_string());
+            let entered = state
+                .psk_textarea
+                .lines()
+                .first()
+                .map_or(String::new(), |l| l.to_string());
 
-                if !psk_value.is_empty() {
-                    match STANDARD.decode(&psk_value) {
-                        Ok(bytes) if bytes.len() == 16 || bytes.len() == 32 => {
-                            state.psk_value = psk_value;
-                            state.editing_psk = false;
-                        }
-                        Ok(_) => {
-                            *toast = Some(crate::tui::app::ToastMessage {
-                                text: "PSK must be 16 or 32 bytes".to_string(),
-                                is_success: false,
-                                is_uncertain: false,
-                            });
-                            *toast_timer = 120;
-                            return None;
-                        }
-                        Err(_) => {
-                            *toast = Some(crate::tui::app::ToastMessage {
-                                text: "Invalid base64 PSK".to_string(),
-                                is_success: false,
-                                is_uncertain: false,
-                            });
-                            *toast_timer = 120;
-                            return None;
-                        }
-                    }
-                } else {
-                    state.psk_value = psk_value;
-                }
-                state.editing_psk = false;
-            } else {
-                state.finish_editing_psk();
+            // Report a malformed key while the user still has the field open.
+            // An empty field is allowed through so it can be cleared; saving
+            // the channel is what refuses it.
+            if state.psk_mode == PskModeKind::Base64
+                && !entered.trim().is_empty()
+                && let Err(message) = decode_base64_psk(entered.trim())
+            {
+                show_toast(toast, toast_timer, &message, false);
+                return None;
             }
+
+            state.psk_value = entered;
+            state.editing_psk = false;
         }
         return None;
     }
@@ -1349,7 +1402,7 @@ pub fn handle_popup_keys(
         return None;
     }
 
-    let popup_fields = get_popup_fields(&state.psk_mode);
+    let popup_fields = get_popup_fields(state.psk_mode);
 
     match key.code {
         KeyCode::Up => {
@@ -1373,7 +1426,11 @@ pub fn handle_popup_keys(
             match field {
                 "Save" => {
                     if is_enter {
-                        return Some(state.to_channel_info(0));
+                        match state.to_channel_info(0) {
+                            Ok(channel) => return Some(channel),
+                            // Keep the popup open so the key material is not lost.
+                            Err(message) => show_toast(toast, toast_timer, &message, false),
+                        }
                     }
                     None
                 }
@@ -1392,28 +1449,9 @@ pub fn handle_popup_keys(
                 }
                 "PSK Mode" => {
                     if cycle_forward || cycle_backward {
-                        let (new_mode, new_value) = match (&state.psk_mode, cycle_forward) {
-                            (PskMode::Default, true) => (PskMode::None, String::new()),
-                            (PskMode::None, true) => (PskMode::Random, String::new()),
-                            (PskMode::Random, true) => {
-                                (PskMode::Base64(String::new()), String::new())
-                            }
-                            (PskMode::Base64(_), true) => {
-                                (PskMode::Passphrase(String::new()), String::new())
-                            }
-                            (PskMode::Passphrase(_), true) => (PskMode::Default, String::new()),
-                            (PskMode::Default, false) => {
-                                (PskMode::Passphrase(String::new()), String::new())
-                            }
-                            (PskMode::None, false) => (PskMode::Default, String::new()),
-                            (PskMode::Random, false) => (PskMode::None, String::new()),
-                            (PskMode::Base64(_), false) => (PskMode::Random, String::new()),
-                            (PskMode::Passphrase(_), false) => {
-                                (PskMode::Base64(String::new()), String::new())
-                            }
-                        };
-                        state.psk_mode = new_mode;
-                        state.psk_value = new_value;
+                        state.psk_mode = state.psk_mode.cycle(cycle_forward);
+                        // The value belongs to the mode that was just left.
+                        state.psk_value.clear();
                     }
                     None
                 }
@@ -1486,6 +1524,206 @@ mod tests {
         }
         reindex_channels(&mut config.channels);
         config
+    }
+
+    /// Drives the popup the way a user does: cycle to `mode`, then type `value`.
+    fn popup_with_psk(mode: PskModeKind, value: &str) -> ChannelPopupState {
+        let mut popup = ChannelPopupState::new();
+        let mut toast = None;
+        let mut toast_timer = 0;
+
+        // Move onto the "PSK Mode" field and cycle until the mode is selected.
+        popup.selected_field = 1;
+        while popup.psk_mode != mode {
+            handle_popup_keys(
+                KeyEvent::from(KeyCode::Right),
+                &mut popup,
+                &mut toast,
+                &mut toast_timer,
+            );
+        }
+
+        if mode.needs_value() {
+            let fields = get_popup_fields(popup.psk_mode);
+            popup.selected_field = fields
+                .iter()
+                .position(|field| *field == "PSK")
+                .expect("modes needing a value expose a PSK field");
+
+            // Enter opens the input overlay, the textarea takes the text, Enter commits.
+            handle_popup_keys(
+                KeyEvent::from(KeyCode::Enter),
+                &mut popup,
+                &mut toast,
+                &mut toast_timer,
+            );
+            popup.psk_textarea = TextArea::new(vec![value.to_string()]);
+            handle_popup_keys(
+                KeyEvent::from(KeyCode::Enter),
+                &mut popup,
+                &mut toast,
+                &mut toast_timer,
+            );
+        }
+
+        popup
+    }
+
+    fn save(popup: &ChannelPopupState) -> Result<ChannelInfo, String> {
+        popup.to_channel_info(0).map(|(_, channel)| channel)
+    }
+
+    const VALID_PSK: &str = "CcZBoFJbADPGEoSkkYPA3Ha23rr7WPcyUo1AjorGQIA=";
+
+    #[test]
+    fn base64_psk_survives_saving() {
+        let popup = popup_with_psk(PskModeKind::Base64, VALID_PSK);
+
+        let channel = save(&popup).expect("valid PSK saves");
+
+        assert_eq!(channel.psk, VALID_PSK);
+        assert_eq!(channel.psk_type, PskType::Aes256);
+    }
+
+    #[test]
+    fn passphrase_hashes_the_entered_text() {
+        let popup = popup_with_psk(PskModeKind::Passphrase, "my secret phrase");
+
+        let channel = save(&popup).expect("valid passphrase saves");
+
+        assert_eq!(channel.psk, hash_phrase_to_psk("my secret phrase"));
+        assert_eq!(channel.psk_type, PskType::Aes256);
+        // Regression: the empty hash is a well-known public constant.
+        assert_ne!(channel.psk, hash_phrase_to_psk(""));
+    }
+
+    #[test]
+    fn an_invalid_base64_psk_is_refused_not_downgraded() {
+        let mut popup = popup_with_psk(PskModeKind::Base64, VALID_PSK);
+        // Bypass field validation the way a stale value would.
+        popup.psk_value = "MTIzNDU2".to_string();
+
+        let error = save(&popup).expect_err("a short PSK is refused");
+
+        assert_eq!(error, "PSK must be 16 or 32 bytes");
+    }
+
+    #[test]
+    fn an_empty_base64_psk_is_refused() {
+        let popup = popup_with_psk(PskModeKind::Base64, "");
+
+        let error = save(&popup).expect_err("an empty PSK is refused");
+
+        assert_eq!(error, "Enter a base64 PSK first");
+    }
+
+    #[test]
+    fn an_empty_passphrase_is_refused() {
+        let popup = popup_with_psk(PskModeKind::Passphrase, "");
+
+        let error = save(&popup).expect_err("an empty passphrase is refused");
+
+        assert_eq!(error, "Enter a passphrase first");
+    }
+
+    #[test]
+    fn a_rejected_psk_raises_a_toast_and_keeps_the_popup_open() {
+        let mut popup = popup_with_psk(PskModeKind::Base64, "");
+        let mut toast = None;
+        let mut toast_timer = 0;
+
+        let fields = get_popup_fields(popup.psk_mode);
+        popup.selected_field = fields
+            .iter()
+            .position(|field| *field == "Save")
+            .expect("Save is always offered");
+        let saved = handle_popup_keys(
+            KeyEvent::from(KeyCode::Enter),
+            &mut popup,
+            &mut toast,
+            &mut toast_timer,
+        );
+
+        assert!(saved.is_none());
+        let toast = toast.expect("the failure is reported");
+        assert_eq!(toast.text, "Enter a base64 PSK first");
+        assert!(!toast.is_success);
+    }
+
+    #[test]
+    fn the_simple_modes_still_save() {
+        let default = save(&popup_with_psk(PskModeKind::Default, "")).expect("saves");
+        assert_eq!(default.psk, DEFAULT_PSK);
+        assert_eq!(default.psk_type, PskType::Default);
+
+        let none = save(&popup_with_psk(PskModeKind::None, "")).expect("saves");
+        assert!(none.psk.is_empty());
+        assert_eq!(none.psk_type, PskType::None);
+
+        let random = save(&popup_with_psk(PskModeKind::Random, "")).expect("saves");
+        assert_eq!(random.psk_type, PskType::Aes256);
+    }
+
+    #[test]
+    fn editing_a_channel_keeps_its_psk() {
+        let mut channel: ChannelInfo = "default".parse().expect("valid channel spec");
+        channel.psk = VALID_PSK.to_string();
+        channel.psk_type = PskType::Aes256;
+
+        let popup = ChannelPopupState::from_channel(0, &channel);
+        let saved = save(&popup).expect("an unchanged channel saves");
+
+        assert_eq!(popup.psk_mode, PskModeKind::Base64);
+        assert_eq!(saved.psk, VALID_PSK);
+    }
+
+    #[test]
+    fn cycling_the_mode_clears_the_stale_value() {
+        let mut popup = popup_with_psk(PskModeKind::Base64, VALID_PSK);
+        assert_eq!(popup.psk_value, VALID_PSK);
+
+        let mut toast = None;
+        let mut toast_timer = 0;
+        popup.selected_field = 1;
+        handle_popup_keys(
+            KeyEvent::from(KeyCode::Right),
+            &mut popup,
+            &mut toast,
+            &mut toast_timer,
+        );
+
+        assert_eq!(popup.psk_mode, PskModeKind::Passphrase);
+        assert!(popup.psk_value.is_empty());
+    }
+
+    #[test]
+    fn a_psk_entered_in_the_popup_reaches_the_url() {
+        use meshurl::decoder::{DecodeResult, decode_url};
+
+        let popup = popup_with_psk(PskModeKind::Base64, VALID_PSK);
+        let mut config = MeshtasticConfig::new();
+        let (_, channel) = popup.to_channel_info(0).expect("valid PSK saves");
+        config.channels.push(channel);
+
+        let url = encode_url(&config).expect("config encodes");
+        let decoded = decode_url(&url).expect("the URL decodes");
+
+        match decoded {
+            DecodeResult::Channel(config) => {
+                assert_eq!(config.channels[0].psk, VALID_PSK);
+                assert_eq!(config.channels[0].psk_type, PskType::Aes256);
+            }
+            DecodeResult::Node(_) => panic!("expected a channel URL"),
+        }
+    }
+
+    #[test]
+    fn mode_cycling_wraps_in_both_directions() {
+        assert_eq!(PskModeKind::Passphrase.cycle(true), PskModeKind::Default);
+        assert_eq!(PskModeKind::Default.cycle(false), PskModeKind::Passphrase);
+        for mode in PskModeKind::ALL {
+            assert_eq!(mode.cycle(true).cycle(false), *mode);
+        }
     }
 
     fn draw_popup(width: u16, height: u16, popup: &ChannelPopupState) {
