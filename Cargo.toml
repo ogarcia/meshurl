@@ -2,8 +2,6 @@
 name = "meshurl"
 version = "0.5.0-dev"
 edition = "2024"
-# Set by ratatui 0.30, which requires 1.88, and by the let chains the TUI uses.
-rust-version = "1.88"
 description = "Meshtastic URL encoder and decoder"
 license = "GPL-3.0-or-later"
 authors = ["Óscar García Amor <ogarcia@connectical.com>"]

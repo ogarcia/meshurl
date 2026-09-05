@@ -35,28 +35,3 @@ jobs:
 
       - name: Run tests
         run: cargo test --all-features
-
-  msrv:
-    name: Minimum supported Rust version
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Read the MSRV from Cargo.toml
-        id: msrv
-        run: |
-          version=$(grep '^rust-version' Cargo.toml | cut -d'"' -f2)
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      - name: Install Rust ${{ steps.msrv.outputs.version }}
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ steps.msrv.outputs.version }}
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build
-        run: cargo build --all-features

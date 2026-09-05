@@ -52,7 +52,7 @@ the fidelity of what is encoded and displayed.
 - `q` and `Ctrl+C` quit the TUI; `Esc` still works.
 - The coding rate is shown in the TUI LoRa panel, matching the CLI.
 - `--version`, and `\,` to put a literal comma in a channel name or passphrase.
-- A CI workflow running rustfmt, clippy and the tests, plus an MSRV job.
+- A CI workflow running rustfmt, clippy and the tests.
 - End to end tests for the command line, and the first tests for the TUI.
 
 ### Changed
