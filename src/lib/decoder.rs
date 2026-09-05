@@ -51,14 +51,35 @@ pub enum DecodeResult {
 /// }
 /// ```
 pub fn decode_url(url: &str) -> Result<DecodeResult, DecodeError> {
-    let hash_part = extract_hash(url)?;
+    let (kind, hash_part) = extract_hash(url)?;
     let decoded = decode_base64(hash_part)?;
 
-    if let Ok(config) = try_decode_as_channel(&decoded) {
+    if decoded.is_empty() {
+        return Err(DecodeError::InvalidUrl(
+            "URL carries no configuration".to_string(),
+        ));
+    }
+
+    match kind {
+        // The prefix states what the payload is, so trust it and report a
+        // mismatch instead of quietly decoding it as the other kind.
+        UrlKind::Channel => try_decode_as_channel(&decoded).map(DecodeResult::Channel),
+        UrlKind::Node => try_decode_as_node(&decoded).map(DecodeResult::Node),
+        UrlKind::Unknown => decode_by_shape(&decoded),
+    }
+}
+
+/// Identifies a payload that arrived without a prefix to go by.
+///
+/// Protobuf skips fields it does not know, so the two message types accept
+/// many of the same byte strings; this is a guess, which is why it is only
+/// reached when the URL itself says nothing.
+fn decode_by_shape(decoded: &[u8]) -> Result<DecodeResult, DecodeError> {
+    if let Ok(config) = try_decode_as_channel(decoded) {
         return Ok(DecodeResult::Channel(config));
     }
 
-    if let Ok(node) = try_decode_as_node(&decoded) {
+    if let Ok(node) = try_decode_as_node(decoded) {
         return Ok(DecodeResult::Node(node));
     }
 
@@ -79,7 +100,20 @@ fn try_decode_as_node(data: &[u8]) -> Result<NodeInfo, DecodeError> {
     Ok(NodeInfo::from_pb(&node_pb))
 }
 
-/// Extracts the base64 hash part from a Meshtastic URL.
+/// What kind of payload a URL announces through its prefix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UrlKind {
+    /// An `/e/` URL: channel configuration.
+    Channel,
+    /// A `/v/` URL: node information.
+    Node,
+    /// A bare hash or base64 string, which says nothing about its contents.
+    Unknown,
+}
+
+/// Extracts the base64 hash part from a Meshtastic URL, along with the kind of
+/// payload the URL claims to carry.
+///
 /// Supports multiple URL formats:
 /// - https://meshtastic.org/e/#<hash> (channel)
 /// - https://meshtastic.org/v/#<hash> (node)
@@ -88,29 +122,34 @@ fn try_decode_as_node(data: &[u8]) -> Result<NodeInfo, DecodeError> {
 /// - #<hash>
 /// - text#<hash>
 /// - <base64> (raw base64 without prefix)
-fn extract_hash(url: &str) -> Result<&str, DecodeError> {
-    url.strip_prefix(MESHTASTIC_CHANNEL_URL_BASE)
-        .or_else(|| url.strip_prefix("meshtastic.org/e/#"))
-        .or_else(|| url.strip_prefix(MESHTASTIC_NODE_URL_BASE))
-        .or_else(|| url.strip_prefix("meshtastic.org/v/#"))
-        .or_else(|| {
-            url.contains('#')
-                .then(|| url.rsplit('#').next().unwrap_or(url))
-        })
-        .or_else(|| {
-            if !url.starts_with("https://") && !url.starts_with("meshtastic.org") && !url.is_empty()
-            {
-                Some(url)
-            } else {
-                None
-            }
-        })
-        .ok_or_else(|| {
-            DecodeError::InvalidUrl(format!(
-                "Expected format: {} or {} <base64>",
-                MESHTASTIC_CHANNEL_URL_BASE, MESHTASTIC_NODE_URL_BASE
-            ))
-        })
+fn extract_hash(url: &str) -> Result<(UrlKind, &str), DecodeError> {
+    const CHANNEL_PREFIXES: &[&str] = &[MESHTASTIC_CHANNEL_URL_BASE, "meshtastic.org/e/#"];
+    const NODE_PREFIXES: &[&str] = &[MESHTASTIC_NODE_URL_BASE, "meshtastic.org/v/#"];
+
+    for prefix in CHANNEL_PREFIXES {
+        if let Some(hash) = url.strip_prefix(prefix) {
+            return Ok((UrlKind::Channel, hash));
+        }
+    }
+
+    for prefix in NODE_PREFIXES {
+        if let Some(hash) = url.strip_prefix(prefix) {
+            return Ok((UrlKind::Node, hash));
+        }
+    }
+
+    if url.contains('#') {
+        return Ok((UrlKind::Unknown, url.rsplit('#').next().unwrap_or(url)));
+    }
+
+    if !url.starts_with("https://") && !url.starts_with("meshtastic.org") && !url.is_empty() {
+        return Ok((UrlKind::Unknown, url));
+    }
+
+    Err(DecodeError::InvalidUrl(format!(
+        "Expected format: {} or {} <base64>",
+        MESHTASTIC_CHANNEL_URL_BASE, MESHTASTIC_NODE_URL_BASE
+    )))
 }
 
 /// Decodes a base64-encoded string into bytes.
@@ -127,19 +166,19 @@ mod tests {
     #[test]
     fn test_extract_hash_channel_url() {
         let url = "https://meshtastic.org/e/#CgsSAQEoATABOgIIDQoPEgEBGgZJYmVyaWEoATABChESAQEaCEFDb3J1w3FhKAEwARIWCAEY-gEgCygFOANABkgBUBtoAcAGAQ";
-        let result = extract_hash(url);
-        assert!(result.is_ok());
-        assert!(result.unwrap().starts_with("CgsSAQEoATABOgIIDQoPEgEBGgZJYmVyaWEoATABChESAQEaCEFDb3J1w3FhKAEwARIWCAEY-gEgCygFOANABkgBUBtoAcAGAQ"));
+        let (kind, hash) = extract_hash(url).expect("a channel URL parses");
+        assert_eq!(kind, UrlKind::Channel);
+        assert!(hash.starts_with("CgsSAQEoATABOgIIDQoPEgEBGgZJYmVyaWEoATABChESAQEaCEFDb3J1w3FhKAEwARIWCAEY-gEgCygFOANABkgBUBtoAcAGAQ"));
     }
 
     #[test]
     fn test_extract_hash_node_url() {
         let url =
             "https://meshtastic.org/v/#EhgSEEdhbGljaWEgQ2FsaWRhZGUaBPCfkJkaDA1Q89kZFRDn_voYAA";
-        let result = extract_hash(url);
-        assert!(result.is_ok());
+        let (kind, hash) = extract_hash(url).expect("a node URL parses");
+        assert_eq!(kind, UrlKind::Node);
         assert_eq!(
-            result.unwrap(),
+            hash,
             "EhgSEEdhbGljaWEgQ2FsaWRhZGUaBPCfkJkaDA1Q89kZFRDn_voYAA"
         );
     }
@@ -154,9 +193,9 @@ mod tests {
     #[test]
     fn test_extract_hash_without_hash() {
         let url = "CgsSAQEoATABOgIIDQoPEgEBGgZJYmVyaWEoATABChESAQEaCEFDb3J1w3FhKAEwARIWCAEY-gEgCygFOANABkgBUBtoAcAGAQ";
-        let result = extract_hash(url);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), url);
+        let (kind, hash) = extract_hash(url).expect("a bare base64 string parses");
+        assert_eq!(kind, UrlKind::Unknown);
+        assert_eq!(hash, url);
     }
 
     #[test]
@@ -202,6 +241,76 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_empty_payload_is_an_error() {
+        // These used to report an empty but successful channel configuration.
+        for url in [
+            "https://meshtastic.org/e/#",
+            "https://meshtastic.org/v/#",
+            "#",
+        ] {
+            let error = decode_url(url).expect_err("an empty payload is refused");
+            assert!(
+                error.to_string().contains("no configuration"),
+                "unexpected error for {}: {}",
+                url,
+                error
+            );
+        }
+    }
+
+    #[test]
+    fn test_channel_prefix_refuses_node_payload() {
+        // A node payload behind an /e/ prefix used to be decoded as a channel.
+        let node_payload = "CAESJQoLIXRlc3QwMDAwMDESEEdhbGljaWEgQ2FsaWRhZGUaBPCfkJk";
+        let url = format!("{}{}", MESHTASTIC_CHANNEL_URL_BASE, node_payload);
+
+        assert!(decode_url(&url).is_err());
+    }
+
+    #[test]
+    fn test_node_prefix_refuses_channel_payload() {
+        let channel_payload = "CgsSAQEoATABOgIIDQ";
+        let url = format!("{}{}", MESHTASTIC_NODE_URL_BASE, channel_payload);
+
+        assert!(decode_url(&url).is_err());
+    }
+
+    #[test]
+    fn test_prefix_decides_the_payload_kind() {
+        let node_payload = "CAESJQoLIXRlc3QwMDAwMDESEEdhbGljaWEgQ2FsaWRhZGUaBPCfkJk";
+        let url = format!("{}{}", MESHTASTIC_NODE_URL_BASE, node_payload);
+
+        match decode_url(&url).expect("a node URL decodes") {
+            DecodeResult::Node(node) => assert_eq!(node.long_name, "Galicia Calidade"),
+            DecodeResult::Channel(_) => panic!("the /v/ prefix must yield a node"),
+        }
+
+        let channel_payload = "CgsSAQEoATABOgIIDQ";
+        let url = format!("{}{}", MESHTASTIC_CHANNEL_URL_BASE, channel_payload);
+
+        match decode_url(&url).expect("a channel URL decodes") {
+            DecodeResult::Channel(config) => assert_eq!(config.channels.len(), 1),
+            DecodeResult::Node(_) => panic!("the /e/ prefix must yield a channel"),
+        }
+    }
+
+    #[test]
+    fn test_bare_payload_is_identified_by_shape() {
+        // Without a prefix there is nothing else to go by.
+        let node_payload = "#CAESJQoLIXRlc3QwMDAwMDESEEdhbGljaWEgQ2FsaWRhZGUaBPCfkJk";
+        assert!(matches!(
+            decode_url(node_payload).expect("decodes"),
+            DecodeResult::Node(_)
+        ));
+
+        let channel_payload = "#CgsSAQEoATABOgIIDQ";
+        assert!(matches!(
+            decode_url(channel_payload).expect("decodes"),
+            DecodeResult::Channel(_)
+        ));
+    }
+
+    #[test]
     fn test_decode_base64_invalid() {
         let result = decode_base64("not-valid-base64!!!");
         assert!(result.is_err());
@@ -215,9 +324,12 @@ mod tests {
 
     #[test]
     fn test_decode_url_empty_hash() {
-        let result = extract_hash("https://meshtastic.org/e/#");
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "");
+        let (kind, hash) = extract_hash("https://meshtastic.org/e/#").expect("parses");
+        assert_eq!(kind, UrlKind::Channel);
+        assert_eq!(hash, "");
+
+        // ...but an empty payload is not a configuration.
+        assert!(decode_url("https://meshtastic.org/e/#").is_err());
     }
 
     #[test]
