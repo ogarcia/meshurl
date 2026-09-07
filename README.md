@@ -107,13 +107,18 @@ The TUI has two modes:
 | --- | --- |
 | `A` | Add new channel |
 | `Enter` | Edit selected channel |
-| `D` | Delete selected channel |
+| `D` / `Del` | Delete selected channel |
+| `U` | Undo the last delete or clear |
 | `+` / `-` | Move channel up/down |
 | `E` | Edit LoRa configuration |
 | `G` | Generate URL from current config |
 | `C` | Copy generated URL to clipboard |
-| `Del` | Clear all configuration |
+| `Shift+Del` | Clear all configuration |
 | `↑` / `↓` | Scroll channels or LoRa config |
+
+`Del` takes the selected channel and `Shift+Del` takes everything, so a
+mistyped key costs one channel rather than the lot. Either way `U` puts back
+what went, one step deep, and the notification says so when it happens.
 
 #### Channel Popup
 

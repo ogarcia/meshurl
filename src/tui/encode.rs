@@ -2,8 +2,8 @@ use base64::Engine;
 use meshurl::encoder::{ModemPreset, RegionCode, encode_url};
 use meshurl::models::{
     CUSTOM_MODEM_NAME, ChannelInfo, ChannelRole, DEFAULT_PSK, LoRaInfo, MODEM_PRESETS,
-    MeshtasticDisplay, ModemConfig, POSITION_OPTIONS, PskType, REGION_CODES, generate_random_psk,
-    get_preset_params, hash_phrase_to_psk, validate_channel_name,
+    MeshtasticConfig, MeshtasticDisplay, ModemConfig, POSITION_OPTIONS, PskType, REGION_CODES,
+    generate_random_psk, get_preset_params, hash_phrase_to_psk, validate_channel_name,
 };
 use meshurl::regions::{default_preset_for_region, region_supports_preset, region_swap_for_preset};
 use ratatui::{
@@ -1006,7 +1006,7 @@ pub fn draw_encode_mode(f: &mut Frame, state: &mut EncodeDrawState) {
         }
         if has_channels {
             keys.push("[Enter] Edit");
-            keys.push("[D] Delete");
+            keys.push("[D/Del] Delete");
         }
         if state.encode_config.channels.len() >= 2 {
             keys.push("[+]/[-] Move");
@@ -1015,6 +1015,10 @@ pub fn draw_encode_mode(f: &mut Frame, state: &mut EncodeDrawState) {
         && state.encode_config.channels.len() < MAX_CHANNELS
     {
         keys.push("[A] Add");
+    }
+
+    if state.can_undo {
+        keys.push("[U] Undo");
     }
 
     keys.push("[E] LoRa");
@@ -1026,7 +1030,9 @@ pub fn draw_encode_mode(f: &mut Frame, state: &mut EncodeDrawState) {
         keys.push("[C] Copy");
     }
 
-    keys.push("[Del] Clear");
+    if has_channels || state.encode_config.lora.is_some() {
+        keys.push("[Shift+Del] Clear all");
+    }
     keys.push("[Q] Quit");
 
     let footer_text = keys.join("  ");
@@ -1115,8 +1121,44 @@ pub fn copy_to_clipboard(text: &str) -> Result<CopyMethod, String> {
     Err("Failed to copy. Install wl-clipboard or xclip".to_string())
 }
 
+/// The configuration a destructive key replaced, kept so it can be put back.
+///
+/// One step deep, which is what a slip of the finger needs: it holds the
+/// channels, the LoRa configuration and the generated URL as they were just
+/// before the last delete or clear.
+pub struct EncodeUndo {
+    config: MeshtasticConfig,
+    selected: Option<usize>,
+    encoded_url: Option<String>,
+}
+
+/// Remembers the configuration before a destructive key changes it.
+fn remember_for_undo(state: &mut EncodeState) {
+    *state.undo = Some(EncodeUndo {
+        config: state.encode_config.clone(),
+        selected: state.encode_channels_state.selected(),
+        encoded_url: state.encoded_url.clone(),
+    });
+}
+
+/// Puts back what the last destructive key took away.
+///
+/// The snapshot is consumed, so a second press has nothing to restore rather
+/// than undoing something older than the user expects.
+fn restore_from_undo(state: &mut EncodeState) {
+    match state.undo.take() {
+        Some(snapshot) => {
+            *state.encode_config = snapshot.config;
+            *state.encoded_url = snapshot.encoded_url;
+            state.encode_channels_state.select(snapshot.selected);
+            show_toast(state.toast, "Restored the previous configuration", true);
+        }
+        None => show_toast(state.toast, "Nothing to undo", false),
+    }
+}
+
 pub fn handle_encode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut EncodeState) {
-    use ratatui::crossterm::event::KeyCode;
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
     if state.lora_popup.is_some() {
         let popup = state.lora_popup.as_mut().unwrap();
@@ -1211,7 +1253,19 @@ pub fn handle_encode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut 
                 *state.toast = Some(ToastMessage::new(text, is_ok, is_uncertain));
             }
         }
-        KeyCode::Delete => {
+        // Delete on its own takes the selected channel, as the key does in any
+        // list, and Shift makes it the whole configuration. They used to be the
+        // other way round, so a finger slipping from `d` onto Delete wiped
+        // everything. A terminal that swallows the modifier lands on the
+        // harmless half of the pair, which undo covers anyway.
+        KeyCode::Delete if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            let had_something =
+                !state.encode_config.channels.is_empty() || state.encode_config.lora.is_some();
+
+            if had_something {
+                remember_for_undo(state);
+            }
+
             state.encode_config.channels.clear();
             state.encode_config.lora = None;
             *state.encoded_url = None;
@@ -1219,7 +1273,12 @@ pub fn handle_encode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut 
             *state.lora_scroll = 0;
             *state.lora_popup = None;
             *state.channel_popup = None;
+
+            if had_something {
+                show_toast(state.toast, "Configuration cleared. [U] to undo", true);
+            }
         }
+        KeyCode::Char('u') | KeyCode::Char('U') => restore_from_undo(state),
         KeyCode::Char('a') | KeyCode::Char('A') => {
             if state.encode_config.channels.len() < MAX_CHANNELS {
                 *state.channel_popup = Some(ChannelPopupState::new());
@@ -1259,12 +1318,18 @@ pub fn handle_encode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut 
                 state.encode_channels_state.select(Some(idx - 1));
             }
         }
-        KeyCode::Char('d') | KeyCode::Char('D') => {
+        // Only with the channel list focused, which is the only place the
+        // footer offers it. The selection survives a panel switch, so without
+        // this a Delete meant for the URL box took a channel with it.
+        KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Delete
+            if *state.active_panel == ActivePanel::Channels =>
+        {
             if let Some(selected) = state
                 .encode_channels_state
                 .selected()
                 .and_then(|s| (s < state.encode_config.channels.len()).then_some(s))
             {
+                remember_for_undo(state);
                 state.encode_config.channels.remove(selected);
                 reindex_channels(&mut state.encode_config.channels);
                 if state.encode_config.channels.is_empty() {
@@ -1274,6 +1339,8 @@ pub fn handle_encode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut 
                         .encode_channels_state
                         .select(Some(state.encode_config.channels.len() - 1));
                 }
+
+                show_toast(state.toast, "Channel deleted. [U] to undo", true);
             }
         }
         KeyCode::Char('e') | KeyCode::Char('E') => {
@@ -2161,7 +2228,7 @@ mod tests {
     use crate::tui::app::ActivePanel;
     use meshurl::models::MeshtasticConfig;
     use meshurl::regions::presets_for_region;
-    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{Terminal, backend::TestBackend};
 
     /// Feeds a key to the encode handler with the channel panel focused.
@@ -2184,9 +2251,276 @@ mod tests {
             lora_scroll: &mut lora_scroll,
             lora_max_scroll: &mut lora_max_scroll,
             toast: &mut toast,
+            undo: &mut None,
         };
 
         handle_encode_keys(KeyEvent::from(code), &mut state);
+    }
+
+    /// The encode-mode state the key handler touches, kept across presses so a
+    /// delete and the undo that follows it can be exercised together.
+    struct Encoder {
+        config: MeshtasticConfig,
+        list_state: ListState,
+        encoded_url: Option<String>,
+        undo: Option<EncodeUndo>,
+        toast: Option<ToastMessage>,
+        active_panel: ActivePanel,
+    }
+
+    impl Encoder {
+        fn new(config: MeshtasticConfig) -> Self {
+            let mut list_state = ListState::default();
+            if !config.channels.is_empty() {
+                list_state.select(Some(0));
+            }
+            Self {
+                config,
+                list_state,
+                encoded_url: None,
+                undo: None,
+                toast: None,
+                active_panel: ActivePanel::Channels,
+            }
+        }
+
+        fn press(&mut self, code: KeyCode) {
+            self.press_key(KeyEvent::from(code));
+        }
+
+        fn press_shift(&mut self, code: KeyCode) {
+            self.press_key(KeyEvent::new(code, KeyModifiers::SHIFT));
+        }
+
+        fn press_key(&mut self, key: KeyEvent) {
+            let mut channel_popup = None;
+            let mut lora_popup = None;
+            let mut lora_scroll = 0;
+            let mut lora_max_scroll = 0;
+
+            let mut state = EncodeState {
+                encode_config: &mut self.config,
+                encoded_url: &mut self.encoded_url,
+                active_panel: &mut self.active_panel,
+                encode_channels_state: &mut self.list_state,
+                channel_popup: &mut channel_popup,
+                lora_popup: &mut lora_popup,
+                lora_scroll: &mut lora_scroll,
+                lora_max_scroll: &mut lora_max_scroll,
+                toast: &mut self.toast,
+                undo: &mut self.undo,
+            };
+
+            handle_encode_keys(key, &mut state);
+        }
+
+        fn names(&self) -> Vec<String> {
+            self.config
+                .channels
+                .iter()
+                .map(|channel| channel.name.clone())
+                .collect()
+        }
+
+        fn toast_text(&self) -> String {
+            self.toast
+                .as_ref()
+                .map(|toast| toast.text.clone())
+                .unwrap_or_default()
+        }
+    }
+
+    #[test]
+    fn delete_takes_the_selected_channel() {
+        let mut encoder = Encoder::new(config_with_channels(3));
+        encoder.list_state.select(Some(1));
+
+        encoder.press(KeyCode::Delete);
+
+        assert_eq!(encoder.names(), ["ch0", "ch2"]);
+    }
+
+    #[test]
+    fn delete_no_longer_clears_everything() {
+        // Reported: reaching for `d` and landing on Delete wiped the lot.
+        let mut config = config_with_channels(3);
+        config.lora = Some(LoRaPopupState::new().to_lora_info());
+        let mut encoder = Encoder::new(config);
+
+        encoder.press(KeyCode::Delete);
+
+        assert_eq!(encoder.names(), ["ch1", "ch2"], "only one channel went");
+        assert!(encoder.config.lora.is_some(), "the LoRa config stayed");
+    }
+
+    #[test]
+    fn shift_delete_clears_everything() {
+        let mut config = config_with_channels(3);
+        config.lora = Some(LoRaPopupState::new().to_lora_info());
+        let mut encoder = Encoder::new(config);
+        encoder.encoded_url = Some("https://example.invalid/e/#abc".to_string());
+
+        encoder.press_shift(KeyCode::Delete);
+
+        assert!(encoder.config.channels.is_empty());
+        assert!(encoder.config.lora.is_none());
+        assert!(encoder.encoded_url.is_none());
+        assert_eq!(encoder.list_state.selected(), None);
+    }
+
+    #[test]
+    fn delete_only_acts_on_the_channel_panel() {
+        // The selection survives a panel switch, so a Delete aimed at the URL
+        // box would otherwise have taken a channel with it.
+        let mut encoder = Encoder::new(config_with_channels(2));
+        encoder.active_panel = ActivePanel::UrlEncode;
+
+        encoder.press(KeyCode::Delete);
+        encoder.press(KeyCode::Char('d'));
+
+        assert_eq!(encoder.names(), ["ch0", "ch1"]);
+        assert!(encoder.undo.is_none(), "nothing was remembered either");
+    }
+
+    #[test]
+    fn undo_puts_back_a_deleted_channel() {
+        let mut encoder = Encoder::new(config_with_channels(3));
+        encoder.list_state.select(Some(1));
+        encoder.press(KeyCode::Char('d'));
+
+        encoder.press(KeyCode::Char('u'));
+
+        assert_eq!(encoder.names(), ["ch0", "ch1", "ch2"]);
+        assert_eq!(encoder.list_state.selected(), Some(1), "and the selection");
+    }
+
+    #[test]
+    fn undo_puts_back_everything_after_a_clear() {
+        let mut config = config_with_channels(2);
+        config.lora = Some(LoRaPopupState::new().to_lora_info());
+        let mut encoder = Encoder::new(config);
+        let url = "https://example.invalid/e/#abc".to_string();
+        encoder.encoded_url = Some(url.clone());
+        encoder.press_shift(KeyCode::Delete);
+
+        encoder.press(KeyCode::Char('u'));
+
+        assert_eq!(encoder.names(), ["ch0", "ch1"]);
+        assert!(encoder.config.lora.is_some(), "the LoRa config came back");
+        assert_eq!(encoder.encoded_url, Some(url), "and the generated URL");
+    }
+
+    #[test]
+    fn undoing_a_delete_keeps_the_channel_indexes() {
+        // Deleting renumbers what is left, so the restored channels must carry
+        // the numbering they had before, not the one they were given after.
+        let mut encoder = Encoder::new(config_with_channels(3));
+        encoder.press(KeyCode::Char('d'));
+
+        encoder.press(KeyCode::Char('u'));
+
+        let indexes: Vec<usize> = encoder
+            .config
+            .channels
+            .iter()
+            .map(|channel| channel.index)
+            .collect();
+        assert_eq!(indexes, [0, 1, 2]);
+    }
+
+    #[test]
+    fn undo_is_one_step_deep() {
+        let mut encoder = Encoder::new(config_with_channels(3));
+        encoder.press(KeyCode::Char('d'));
+        encoder.press(KeyCode::Char('d'));
+
+        encoder.press(KeyCode::Char('u'));
+        assert_eq!(encoder.names(), ["ch1", "ch2"], "the last delete came back");
+
+        encoder.press(KeyCode::Char('u'));
+        assert_eq!(encoder.names(), ["ch1", "ch2"], "the one before did not");
+        assert_eq!(encoder.toast_text(), "Nothing to undo");
+    }
+
+    #[test]
+    fn undo_with_nothing_to_undo_says_so() {
+        let mut encoder = Encoder::new(MeshtasticConfig::new());
+
+        encoder.press(KeyCode::Char('u'));
+
+        assert_eq!(encoder.toast_text(), "Nothing to undo");
+        assert!(encoder.config.channels.is_empty());
+    }
+
+    #[test]
+    fn clearing_nothing_leaves_nothing_to_undo() {
+        let mut encoder = Encoder::new(MeshtasticConfig::new());
+
+        encoder.press_shift(KeyCode::Delete);
+
+        assert!(encoder.undo.is_none(), "there was nothing to remember");
+        assert_eq!(encoder.toast_text(), "", "and nothing to report");
+    }
+
+    #[test]
+    fn the_destructive_keys_offer_the_undo() {
+        let mut encoder = Encoder::new(config_with_channels(2));
+
+        encoder.press(KeyCode::Char('d'));
+        assert!(encoder.toast_text().contains("[U] to undo"));
+
+        encoder.press_shift(KeyCode::Delete);
+        assert!(encoder.toast_text().contains("[U] to undo"));
+    }
+
+    /// Renders encode mode and returns the text on screen.
+    fn render_encode(config: &MeshtasticConfig, can_undo: bool) -> String {
+        let mut list_state = ListState::default();
+        let mut lora_max_scroll = 0;
+        let encoded_url = None;
+        let lora_popup = None;
+        // Wide enough for the whole footer, which a real terminal cuts short.
+        let mut terminal = Terminal::new(TestBackend::new(160, 30)).expect("test backend starts");
+
+        terminal
+            .draw(|f| {
+                let mut state = EncodeDrawState {
+                    encode_config: config,
+                    encoded_url: &encoded_url,
+                    active_panel: ActivePanel::Channels,
+                    encode_channels_state: &mut list_state,
+                    lora_popup: &lora_popup,
+                    lora_scroll: 0,
+                    lora_max_scroll: &mut lora_max_scroll,
+                    can_undo,
+                };
+                draw_encode_mode(f, &mut state);
+            })
+            .expect("encode mode renders");
+
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn the_footer_names_both_delete_keys() {
+        let screen = render_encode(&config_with_channels(1), false);
+
+        assert!(screen.contains("[D/Del] Delete"), "the one channel");
+        assert!(screen.contains("[Shift+Del] Clear all"), "and the lot");
+    }
+
+    #[test]
+    fn the_footer_offers_the_undo_once_there_is_one() {
+        let config = config_with_channels(1);
+
+        assert!(!render_encode(&config, false).contains("[U] Undo"));
+        assert!(render_encode(&config, true).contains("[U] Undo"));
     }
 
     fn config_with_channels(count: usize) -> MeshtasticConfig {
@@ -2761,6 +3095,7 @@ mod tests {
             lora_scroll: &mut lora_scroll,
             lora_max_scroll: &mut lora_max_scroll,
             toast: &mut toast,
+            undo: &mut None,
         };
         handle_encode_keys(KeyEvent::from(code), &mut state);
 
@@ -3537,6 +3872,7 @@ mod tests {
             lora_scroll: &mut lora_scroll,
             lora_max_scroll: &mut lora_max_scroll,
             toast: &mut toast,
+            undo: &mut None,
         };
         handle_encode_keys(KeyEvent::from(code), &mut state);
 

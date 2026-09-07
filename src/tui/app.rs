@@ -50,6 +50,8 @@ pub struct AppState {
     pub channel_popup: Option<crate::tui::encode::ChannelPopupState>,
     pub lora_popup: Option<crate::tui::encode::LoRaPopupState>,
     pub toast: Option<ToastMessage>,
+    /// What the last destructive key took away, so it can be put back.
+    pub undo: Option<crate::tui::encode::EncodeUndo>,
 }
 
 pub struct DecodeState<'a> {
@@ -73,6 +75,7 @@ pub struct EncodeState<'a> {
     pub lora_scroll: &'a mut u16,
     pub lora_max_scroll: &'a mut u16,
     pub toast: &'a mut Option<ToastMessage>,
+    pub undo: &'a mut Option<crate::tui::encode::EncodeUndo>,
 }
 
 pub struct DecodeDrawState<'a> {
@@ -94,6 +97,7 @@ pub struct EncodeDrawState<'a> {
     pub lora_popup: &'a Option<crate::tui::encode::LoRaPopupState>,
     pub lora_scroll: u16,
     pub lora_max_scroll: &'a mut u16,
+    pub can_undo: bool,
 }
 
 impl AppState {
@@ -122,6 +126,7 @@ impl Default for AppState {
             channel_popup: None,
             lora_popup: None,
             toast: None,
+            undo: None,
         }
     }
 }
@@ -260,6 +265,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent) -> ControlFlow<()> {
                 lora_scroll: &mut state.lora_scroll,
                 lora_max_scroll: &mut state.lora_max_scroll,
                 toast: &mut state.toast,
+                undo: &mut state.undo,
             };
             crate::tui::encode::handle_encode_keys(key, &mut encode_state);
         } else {
@@ -330,6 +336,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent) -> ControlFlow<()> {
                             lora_scroll: &mut state.lora_scroll,
                             lora_max_scroll: &mut state.lora_max_scroll,
                             toast: &mut state.toast,
+                            undo: &mut state.undo,
                         };
                         crate::tui::encode::handle_encode_keys(key, &mut encode_state);
                     } else {
@@ -363,6 +370,7 @@ fn draw(f: &mut Frame, state: &mut AppState) {
             lora_popup: &state.lora_popup,
             lora_scroll: state.lora_scroll,
             lora_max_scroll: &mut state.lora_max_scroll,
+            can_undo: state.undo.is_some(),
         };
         crate::tui::encode::draw_encode_mode(f, &mut encode_draw_state);
 

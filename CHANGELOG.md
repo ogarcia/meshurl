@@ -12,6 +12,9 @@ adheres to [Semantic Versioning][semver].
 
 ### Added
 
+- `U` undoes the last delete or clear in encode mode, one step deep, putting
+  back the channels, the LoRa configuration and the generated URL as they
+  were. The notification that follows a delete says the key is there.
 - Enter on the channel popup's PSK Mode and Position opens a list of every
   value, as the LoRa popup already did for Region, Modem and Hop Limit. Each
   entry carries what it does: what a PSK mode makes of the key, and the
@@ -19,6 +22,13 @@ adheres to [Semantic Versioning][semver].
 
 ### Changed
 
+- **`Del` and `Shift+Del` have swapped meanings.** `Del` now takes the
+  selected channel, as the key does in any list, and `Shift+Del` clears the
+  whole configuration. A finger slipping from `D` onto `Del` used to wipe
+  every channel, the LoRa configuration and the generated URL at once.
+- Deleting a channel needs the channel list focused, which is the only place
+  the footer offers it. The selection survives a panel switch, so a `D` typed
+  anywhere in encode mode used to take a channel with it.
 - The detail beside each entry of a list overlay lines up in a column, so a
   list of names of uneven length still reads down the page.
 - The arm64 binary is built on a native arm64 runner instead of through
