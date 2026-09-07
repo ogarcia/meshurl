@@ -8,6 +8,14 @@ adheres to [Semantic Versioning][semver].
 [keepachangelog]: https://keepachangelog.com/en/1.1.0/
 [semver]: https://semver.org/spec/v2.0.0.html
 
+## [0.6.0] - unreleased
+
+### Fixed
+
+- Esc in the channel name box closed the whole popup instead of just the box,
+  discarding everything else set on the channel. Both the popup and the
+  application handled the key, and the one that ran did not know about the box.
+
 ## [0.5.0] - 2026-09-05
 
 An audit of the whole codebase, covering key generation, several panics, and

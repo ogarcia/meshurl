@@ -1106,10 +1106,9 @@ pub fn handle_encode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut 
     if state.channel_popup.is_some() {
         let popup = state.channel_popup.as_mut().unwrap();
 
-        if popup.editing_psk && matches!(key.code, KeyCode::Esc) {
-            popup.cancel_editing_psk();
-            return;
-        }
+        // Esc closes one layer at a time: an overlay consumes its own, and only
+        // a popup with nothing on top of it closes here.
+        let overlay_was_open = popup.editing_name || popup.editing_psk;
 
         let result = handle_popup_keys(key, popup, state.toast);
 
@@ -1139,12 +1138,11 @@ pub fn handle_encode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut 
                 *state.channel_popup = None;
             }
             None => {
-                if key.code == KeyCode::Esc {
+                if key.code == KeyCode::Esc && !overlay_was_open {
                     *state.channel_popup = None;
-                } else if key.code == KeyCode::Enter {
+                } else if key.code == KeyCode::Enter && !overlay_was_open {
                     let popup_fields = get_popup_fields(popup.psk_mode);
-                    let field = popup_fields[popup.selected_field];
-                    if field == "Cancel" {
+                    if popup_fields.get(popup.selected_field) == Some(&"Cancel") {
                         *state.channel_popup = None;
                     }
                 }
@@ -1897,6 +1895,13 @@ pub fn handle_popup_keys(
     use ratatui::crossterm::event::KeyCode;
 
     if state.editing_name {
+        // Esc closes the box alone: it used to fall through and take the whole
+        // popup with it, losing everything else typed into the channel.
+        if matches!(key.code, KeyCode::Esc) {
+            state.cancel_editing_name();
+            return None;
+        }
+
         if matches!(key.code, KeyCode::Enter) {
             let entered = state
                 .name_textarea
@@ -1918,6 +1923,11 @@ pub fn handle_popup_keys(
     }
 
     if state.editing_psk {
+        if matches!(key.code, KeyCode::Esc) {
+            state.cancel_editing_psk();
+            return None;
+        }
+
         if matches!(key.code, KeyCode::Enter) {
             let entered = state
                 .psk_textarea
@@ -2340,6 +2350,83 @@ mod tests {
         for mode in PskModeKind::ALL {
             assert_eq!(mode.cycle(true).cycle(false), *mode);
         }
+    }
+
+    #[test]
+    fn esc_closes_the_name_box_but_not_the_channel_popup() {
+        // Reported: Esc in the name box left the whole channel behind.
+        let mut config = MeshtasticConfig::new();
+        let mut list_state = ListState::default();
+        let mut popup = ChannelPopupState::new();
+        popup.position_index = 4;
+        popup.start_editing_name();
+
+        let popup = press_with_channel(&mut config, &mut list_state, KeyCode::Esc, popup)
+            .expect("the channel popup is still open");
+
+        assert!(!popup.editing_name, "the name box closed");
+        assert_eq!(popup.position_index, 4, "the rest of the channel survived");
+    }
+
+    #[test]
+    fn esc_closes_the_psk_box_but_not_the_channel_popup() {
+        let mut config = MeshtasticConfig::new();
+        let mut list_state = ListState::default();
+        let mut popup = popup_with_psk(PskModeKind::Base64, VALID_PSK);
+        popup.start_editing_psk();
+
+        let popup = press_with_channel(&mut config, &mut list_state, KeyCode::Esc, popup)
+            .expect("the channel popup is still open");
+
+        assert!(!popup.editing_psk, "the PSK box closed");
+        assert_eq!(popup.psk_value, VALID_PSK, "the key survived");
+    }
+
+    #[test]
+    fn esc_closes_the_channel_popup_when_nothing_is_open() {
+        let mut config = MeshtasticConfig::new();
+        let mut list_state = ListState::default();
+
+        let popup = press_with_channel(
+            &mut config,
+            &mut list_state,
+            KeyCode::Esc,
+            ChannelPopupState::new(),
+        );
+
+        assert!(popup.is_none(), "the channel popup closed");
+    }
+
+    /// Feeds a key to the encode handler with the channel popup open,
+    /// returning the popup afterwards so it can be inspected.
+    fn press_with_channel(
+        config: &mut MeshtasticConfig,
+        list_state: &mut ListState,
+        code: KeyCode,
+        popup: ChannelPopupState,
+    ) -> Option<ChannelPopupState> {
+        let mut active_panel = ActivePanel::Channels;
+        let mut encoded_url = None;
+        let mut channel_popup = Some(popup);
+        let mut lora_popup = None;
+        let mut lora_scroll = 0;
+        let mut lora_max_scroll = 0;
+        let mut toast = None;
+
+        let mut state = EncodeState {
+            encode_config: config,
+            encoded_url: &mut encoded_url,
+            active_panel: &mut active_panel,
+            encode_channels_state: list_state,
+            channel_popup: &mut channel_popup,
+            lora_popup: &mut lora_popup,
+            lora_scroll: &mut lora_scroll,
+            lora_max_scroll: &mut lora_max_scroll,
+            toast: &mut toast,
+        };
+        handle_encode_keys(KeyEvent::from(code), &mut state);
+
+        channel_popup
     }
 
     fn draw_popup(width: u16, height: u16, popup: &ChannelPopupState) {

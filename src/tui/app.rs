@@ -307,25 +307,13 @@ fn handle_key(state: &mut AppState, key: KeyEvent) -> ControlFlow<()> {
                     }
                     state.editing_url = false;
                 }
+                // An open popup never reaches here: `has_popup` sends Esc to
+                // the encode handler, which closes one layer at a time. Two
+                // places acting on the same key is what let Esc in the channel
+                // name box close the whole popup.
                 KeyCode::Esc => {
                     if state.active_panel == ActivePanel::Url && state.editing_url {
                         state.editing_url = false;
-                    } else if state.app_mode == AppMode::Encode
-                        && state.channel_popup.as_ref().is_some_and(|p| p.editing_name)
-                    {
-                        if let Some(popup) = state.channel_popup.as_mut() {
-                            popup.cancel_editing_name();
-                        }
-                    } else if state.app_mode == AppMode::Encode
-                        && state.channel_popup.as_ref().is_some_and(|p| p.editing_psk)
-                    {
-                        if let Some(popup) = state.channel_popup.as_mut() {
-                            popup.cancel_editing_psk();
-                        }
-                    } else if state.app_mode == AppMode::Encode && state.channel_popup.is_some() {
-                        state.channel_popup = None;
-                    } else if state.app_mode == AppMode::Encode && state.lora_popup.is_some() {
-                        state.lora_popup = None;
                     } else {
                         return ControlFlow::Break(());
                     }
@@ -523,6 +511,26 @@ mod tests {
 
         // A second Esc, with nothing left open, quits.
         assert!(press(&mut state, KeyCode::Esc).is_break());
+    }
+
+    #[test]
+    fn esc_closes_the_name_box_before_the_channel_popup() {
+        // The name box used to take the whole popup down with it, because both
+        // this handler and the encode one acted on Esc.
+        let mut state = with_channel_popup();
+        state
+            .channel_popup
+            .as_mut()
+            .expect("the popup is open")
+            .start_editing_name();
+
+        assert!(press(&mut state, KeyCode::Esc).is_continue());
+        let popup = state.channel_popup.as_ref().expect("the popup stays open");
+        assert!(!popup.editing_name, "the name box closed");
+
+        // Only now, with nothing on top of it, does the popup close.
+        assert!(press(&mut state, KeyCode::Esc).is_continue());
+        assert!(state.channel_popup.is_none());
     }
 
     #[test]
