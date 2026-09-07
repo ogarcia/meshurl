@@ -21,6 +21,10 @@ adheres to [Semantic Versioning][semver].
 
 - The detail beside each entry of a list overlay lines up in a column, so a
   list of names of uneven length still reads down the page.
+- The arm64 binary is built on a native arm64 runner instead of through
+  `cross`, which drops a 200 line linker warning that was really the trace of
+  the wrapper inside cross's image, and with it the `cargo install cross` that
+  was the slowest step of the release.
 
 ### Fixed
 

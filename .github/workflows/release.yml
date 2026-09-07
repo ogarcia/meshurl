@@ -16,7 +16,8 @@ jobs:
             os_name: linux
             arch: amd64
             name: meshurl-linux-amd64.tar.gz
-          - os: ubuntu-latest
+          # No `-latest` label exists for arm64, so the version is pinned.
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             os_name: linux
             arch: arm64
@@ -44,20 +45,7 @@ jobs:
       - name: Add target
         run: rustup target add ${{ matrix.target }}
 
-      - name: Install cross
-        if: matrix.target == 'aarch64-unknown-linux-musl'
-        run: cargo install cross
-
-      - name: Build with cross
-        if: matrix.target == 'aarch64-unknown-linux-musl'
-        run: |
-          cross build --release --target aarch64-unknown-linux-musl
-          mkdir -p release
-          cp target/aarch64-unknown-linux-musl/release/meshurl release/meshurl
-        shell: bash
-
       - name: Build
-        if: matrix.target != 'aarch64-unknown-linux-musl'
         run: |
           cargo build --release --target ${{ matrix.target }}
           mkdir -p release
