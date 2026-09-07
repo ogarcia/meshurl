@@ -522,6 +522,27 @@ mod tests {
     }
 
     #[test]
+    fn m_carries_the_add_flag_into_encode_mode() {
+        // Losing it would quietly turn a URL that adds channels into one that
+        // replaces the whole channel table.
+        let add_url = format!(
+            "{}{}",
+            meshurl::models::MESHTASTIC_CHANNEL_ADD_URL_BASE,
+            "CgsSAQEoATABOgIIDQ"
+        );
+        let decoded = meshurl::decoder::decode_url(&add_url).expect("the URL decodes");
+        let mut state = AppState {
+            config_result: Some(Ok(decoded)),
+            ..Default::default()
+        };
+
+        assert!(press(&mut state, KeyCode::Char('m')).is_continue());
+
+        assert_eq!(state.app_mode, AppMode::Encode);
+        assert!(state.encode_config.add_only, "it is still an add URL");
+    }
+
+    #[test]
     fn esc_closes_the_name_box_before_the_channel_popup() {
         // The name box used to take the whole popup down with it, because both
         // this handler and the encode one acted on Esc.

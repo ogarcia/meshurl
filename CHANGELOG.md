@@ -12,6 +12,12 @@ adheres to [Semantic Versioning][semver].
 
 ### Added
 
+- Channel URLs that add to a device instead of replacing it. Importing a
+  plain URL overwrites the whole channel table; one carrying `?add=true` puts
+  each channel into the first free slot as a secondary channel. `R` in the TUI
+  and `--add` on the command line choose between the two, and a decoded URL
+  says which it is and keeps it when carried into encode mode with `M`. Note
+  that the short form of a URL cannot carry the flag.
 - `U` undoes the last delete or clear in encode mode, one step deep, putting
   back the channels, the LoRa configuration and the generated URL as they
   were. The notification that follows a delete says the key is there.
@@ -30,6 +36,8 @@ adheres to [Semantic Versioning][semver].
 - Deleting a channel needs the channel list focused, which is the only place
   the footer offers it. The selection survives a panel switch, so a `D` typed
   anywhere in encode mode used to take a channel with it.
+- Library API: `MeshtasticConfig` gains an `add_only` field, which decides
+  whether `encode_url` emits the plain or the `?add=true` form.
 - The footer takes as many lines as its key hints need, up to three, instead
   of one line that cut the tail off. It already ran past 128 columns before
   these keys were added, so `[Q] Quit` was off the screen on any ordinary
@@ -44,6 +52,10 @@ adheres to [Semantic Versioning][semver].
 
 ### Fixed
 
+- An `?add=true` URL was not recognised as a channel URL. The prefix was
+  matched whole, so the query string sent the URL down the fallback path that
+  guesses a payload's kind by shape, the very ambiguity the `/e/` and `/v/`
+  prefixes were made to settle in 0.5.0.
 - `Del` while typing a URL in decode mode threw the URL away instead of
   deleting a character: the key was read before the URL box got a look at it.
 - Esc in the channel name box closed the whole popup instead of just the box,

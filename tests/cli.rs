@@ -199,6 +199,62 @@ fn ignore_mqtt_can_be_turned_on() {
     assert!(out.contains("Ignore MQTT: Yes"));
 }
 
+/// The URL from an `encode` run.
+fn generated_url(args: &[&str]) -> String {
+    stdout_of(args)
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("URL: "))
+        .expect("the output carries a URL")
+        .trim()
+        .to_string()
+}
+
+#[test]
+fn add_asks_for_the_channels_to_be_added() {
+    let url = generated_url(&["encode", "-c", "name=Extra", "--add"]);
+
+    assert!(
+        url.starts_with("https://meshtastic.org/e/?add=true#"),
+        "{} is not an add URL",
+        url
+    );
+}
+
+#[test]
+fn a_plain_url_replaces_the_channels() {
+    let url = generated_url(&["encode", "-c", "name=Extra"]);
+
+    assert!(url.starts_with("https://meshtastic.org/e/#"), "{}", url);
+}
+
+#[test]
+fn an_add_url_says_what_it_will_do_on_the_device() {
+    let out = stdout_of(&["encode", "-c", "name=Extra", "--add"]);
+
+    // The short form has nowhere to carry the flag, so it is worth a warning.
+    assert!(out.contains("only the full URL adds"));
+    assert!(out.contains("adds these channels to the ones on the device"));
+}
+
+#[test]
+fn an_add_url_decodes_as_one() {
+    let url = generated_url(&["encode", "-c", "name=Extra", "--add"]);
+
+    let decoded = stdout_of(&["decode", &url]);
+
+    assert!(decoded.contains("Extra"), "the channels decoded");
+    assert!(decoded.contains("adds these channels to the ones on the device"));
+}
+
+#[test]
+fn the_payload_is_the_same_whichever_way_it_is_imported() {
+    let adding = generated_url(&["encode", "-c", "name=Extra", "--add"]);
+    let replacing = generated_url(&["encode", "-c", "name=Extra"]);
+
+    let payload = |url: &str| url.rsplit('#').next().unwrap_or_default().to_string();
+    assert_eq!(payload(&adding), payload(&replacing));
+}
+
 #[test]
 fn reports_its_version() {
     let out = stdout_of(&["--version"]);

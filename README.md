@@ -7,7 +7,8 @@ A [Meshtastic][meshtastic] channel configuration URL encoder and decoder written
 
 ## Features
 
-- Decode and encode Meshtastic channel URLs (`/e/`)
+- Decode and encode Meshtastic channel URLs (`/e/`), replacing a device's
+  channels or adding to them (`?add=true`)
 - Decode node info URLs (`/v/`) to display device information
 - Support for multiple channels (up to 8)
 - PSK modes: Default, None, Random, Base64, Passphrase
@@ -112,6 +113,7 @@ The TUI has two modes:
 | `+` / `-` | Move channel up/down |
 | `E` | Edit LoRa configuration |
 | `G` | Generate URL from current config |
+| `R` | Whether the URL replaces the device's channels or adds to them |
 | `C` | Copy generated URL to clipboard |
 | `Shift+Del` | Clear all configuration |
 | `↑` / `↓` | Scroll channels or LoRa config |
@@ -122,6 +124,25 @@ what went, one step deep, and the notification says so when it happens.
 
 The footer at the bottom lists the keys the focused panel accepts, on as many
 lines as they need for the width of the terminal.
+
+#### Replacing or adding channels
+
+Importing a channel URL normally replaces the whole channel table of the
+device it is opened on. A URL carrying `?add=true` puts each channel into the
+first free slot instead, as a secondary channel, leaving the ones already
+there alone; channels whose name is already present are skipped.
+
+`R` in the TUI and `--add` on the command line choose between the two. The
+channel numbers are not yours to pick either way: the URL format carries an
+ordered list of channels with no index in it, so whoever imports it decides
+where they land. Ordering them with `+` and `-` is as far as it goes.
+
+```shell
+meshurl encode -c 'name=Private,psk_mode=random' --add
+```
+
+The short form of the URL has nowhere to put the query string, so only the
+full URL adds rather than replaces.
 
 #### Channel Popup
 

@@ -38,6 +38,12 @@ struct EncodeArgs {
     )]
     channels: Vec<ChannelInfo>,
 
+    #[arg(
+        long,
+        help = "Add these channels to the ones a device already has, instead of replacing its channel table"
+    )]
+    add: bool,
+
     #[command(flatten)]
     lora: Option<LoRaArgs>,
 }
@@ -50,6 +56,7 @@ impl EncodeArgs {
   meshurl encode -c 'name=Private,psk_base64=CcZBoFJbADMGEoSkkYPA3Ha23rr7WPcyUo1AjorGQIA='
   meshurl encode -c 'uplink,downlink,pos=32' -c 'name=Iberia,uplink,downlink'
   meshurl encode -c 'name=A\,B'   (escape a comma with \, to keep it in a value)
+  meshurl encode -c 'name=Private,psk_mode=random' --add
 
 PSK Modes:
   psk_mode=default  - Use the default (weak) key
@@ -289,6 +296,7 @@ fn main() {
 
 fn encode_config(args: &EncodeArgs) -> Result<(MeshtasticConfig, String, String), EncodeError> {
     let mut config = MeshtasticConfig::new();
+    config.add_only = args.add;
 
     let channels_iter: Box<dyn Iterator<Item = ChannelInfo>> = if args.channels.is_empty() {
         let ch: ChannelInfo = "default"

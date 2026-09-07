@@ -7,7 +7,8 @@ use prost::Message;
 
 use crate::errors::DecodeError;
 use crate::models::{
-    MESHTASTIC_CHANNEL_URL_BASE, MESHTASTIC_NODE_URL_BASE, MeshtasticConfig, NodeInfo,
+    MESHTASTIC_CHANNEL_ADD_URL_BASE, MESHTASTIC_CHANNEL_URL_BASE, MESHTASTIC_NODE_URL_BASE,
+    MeshtasticConfig, NodeInfo,
 };
 
 /// Result of decoding a Meshtastic URL.
@@ -51,8 +52,8 @@ pub enum DecodeResult {
 /// }
 /// ```
 pub fn decode_url(url: &str) -> Result<DecodeResult, DecodeError> {
-    let (kind, hash_part) = extract_hash(url)?;
-    let decoded = decode_base64(hash_part)?;
+    let parts = extract_hash(url)?;
+    let decoded = decode_base64(parts.payload)?;
 
     if decoded.is_empty() {
         return Err(DecodeError::InvalidUrl(
@@ -60,12 +61,22 @@ pub fn decode_url(url: &str) -> Result<DecodeResult, DecodeError> {
         ));
     }
 
-    match kind {
+    let result = match parts.kind {
         // The prefix states what the payload is, so trust it and report a
         // mismatch instead of quietly decoding it as the other kind.
         UrlKind::Channel => try_decode_as_channel(&decoded).map(DecodeResult::Channel),
         UrlKind::Node => try_decode_as_node(&decoded).map(DecodeResult::Node),
         UrlKind::Unknown => decode_by_shape(&decoded),
+    };
+
+    // `add=true` is part of the URL, not of the payload, so it is carried over
+    // once the channels themselves are decoded.
+    match result {
+        Ok(DecodeResult::Channel(mut config)) => {
+            config.add_only = parts.add_only;
+            Ok(DecodeResult::Channel(config))
+        }
+        other => other,
     }
 }
 
@@ -111,39 +122,79 @@ enum UrlKind {
     Unknown,
 }
 
+/// What a URL turned out to be, and the payload to decode.
+struct UrlParts<'a> {
+    kind: UrlKind,
+    payload: &'a str,
+    /// Whether the URL asked to add its channels rather than replace them.
+    add_only: bool,
+}
+
 /// Extracts the base64 hash part from a Meshtastic URL, along with the kind of
 /// payload the URL claims to carry.
 ///
 /// Supports multiple URL formats:
 /// - https://meshtastic.org/e/#<hash> (channel)
+/// - https://meshtastic.org/e/?add=true#<hash> (channel, added not replaced)
 /// - https://meshtastic.org/v/#<hash> (node)
 /// - meshtastic.org/e/#<hash>
 /// - meshtastic.org/v/#<hash>
 /// - #<hash>
 /// - text#<hash>
 /// - <base64> (raw base64 without prefix)
-fn extract_hash(url: &str) -> Result<(UrlKind, &str), DecodeError> {
+fn extract_hash(url: &str) -> Result<UrlParts<'_>, DecodeError> {
     const CHANNEL_PREFIXES: &[&str] = &[MESHTASTIC_CHANNEL_URL_BASE, "meshtastic.org/e/#"];
+    const CHANNEL_ADD_PREFIXES: &[&str] = &[
+        MESHTASTIC_CHANNEL_ADD_URL_BASE,
+        "meshtastic.org/e/?add=true#",
+    ];
     const NODE_PREFIXES: &[&str] = &[MESHTASTIC_NODE_URL_BASE, "meshtastic.org/v/#"];
 
+    // Before the plain form, whose prefix is not a prefix of this one.
+    for prefix in CHANNEL_ADD_PREFIXES {
+        if let Some(payload) = url.strip_prefix(prefix) {
+            return Ok(UrlParts {
+                kind: UrlKind::Channel,
+                payload,
+                add_only: true,
+            });
+        }
+    }
+
     for prefix in CHANNEL_PREFIXES {
-        if let Some(hash) = url.strip_prefix(prefix) {
-            return Ok((UrlKind::Channel, hash));
+        if let Some(payload) = url.strip_prefix(prefix) {
+            return Ok(UrlParts {
+                kind: UrlKind::Channel,
+                payload,
+                add_only: false,
+            });
         }
     }
 
     for prefix in NODE_PREFIXES {
-        if let Some(hash) = url.strip_prefix(prefix) {
-            return Ok((UrlKind::Node, hash));
+        if let Some(payload) = url.strip_prefix(prefix) {
+            return Ok(UrlParts {
+                kind: UrlKind::Node,
+                payload,
+                add_only: false,
+            });
         }
     }
 
     if url.contains('#') {
-        return Ok((UrlKind::Unknown, url.rsplit('#').next().unwrap_or(url)));
+        return Ok(UrlParts {
+            kind: UrlKind::Unknown,
+            payload: url.rsplit('#').next().unwrap_or(url),
+            add_only: false,
+        });
     }
 
     if !url.starts_with("https://") && !url.starts_with("meshtastic.org") && !url.is_empty() {
-        return Ok((UrlKind::Unknown, url));
+        return Ok(UrlParts {
+            kind: UrlKind::Unknown,
+            payload: url,
+            add_only: false,
+        });
     }
 
     Err(DecodeError::InvalidUrl(format!(
@@ -163,22 +214,86 @@ fn decode_base64(hash: &str) -> Result<Vec<u8>, DecodeError> {
 mod tests {
     use super::*;
 
+    /// A one channel `ChannelSet`, and a `NodeInfo`, as the payload of a URL.
+    const CHANNEL_PAYLOAD: &str = "CgsSAQEoATABOgIIDQ";
+    const NODE_PAYLOAD: &str = "CAESJQoLIXRlc3QwMDAwMDESEEdhbGljaWEgQ2FsaWRhZGUaBPCfkJk";
+
+    #[test]
+    fn an_add_url_is_a_channel_url() {
+        // It used to fall through to the shape guessing, because the query
+        // string meant the `/e/` prefix no longer matched.
+        let url = format!("{}{}", MESHTASTIC_CHANNEL_ADD_URL_BASE, CHANNEL_PAYLOAD);
+
+        let parts = extract_hash(&url).expect("an add URL parses");
+
+        assert_eq!(parts.kind, UrlKind::Channel);
+        assert!(parts.add_only, "and it says so");
+        assert_eq!(parts.payload, CHANNEL_PAYLOAD);
+    }
+
+    #[test]
+    fn an_add_url_without_the_scheme_is_recognised_too() {
+        let url = format!("meshtastic.org/e/?add=true#{}", CHANNEL_PAYLOAD);
+
+        let parts = extract_hash(&url).expect("an add URL parses");
+
+        assert_eq!(parts.kind, UrlKind::Channel);
+        assert!(parts.add_only);
+    }
+
+    #[test]
+    fn decoding_an_add_url_keeps_the_flag() {
+        let url = format!("{}{}", MESHTASTIC_CHANNEL_ADD_URL_BASE, CHANNEL_PAYLOAD);
+
+        match decode_url(&url).expect("the URL decodes") {
+            DecodeResult::Channel(config) => {
+                assert!(config.add_only, "the configuration carries it");
+                assert!(!config.channels.is_empty(), "and the channels decoded");
+            }
+            DecodeResult::Node(_) => panic!("expected a channel URL"),
+        }
+    }
+
+    #[test]
+    fn a_plain_url_is_not_an_add_url() {
+        match decode_url(&format!(
+            "{}{}",
+            MESHTASTIC_CHANNEL_URL_BASE, CHANNEL_PAYLOAD
+        ))
+        .expect("the URL decodes")
+        {
+            DecodeResult::Channel(config) => assert!(!config.add_only),
+            DecodeResult::Node(_) => panic!("expected a channel URL"),
+        }
+    }
+
+    #[test]
+    fn a_node_url_is_never_an_add_url() {
+        // `add=true` is about a channel table, which node URLs do not carry.
+        let url = format!("{}{}", MESHTASTIC_NODE_URL_BASE, NODE_PAYLOAD);
+
+        let parts = extract_hash(&url).expect("a node URL parses");
+
+        assert!(!parts.add_only);
+    }
+
     #[test]
     fn test_extract_hash_channel_url() {
         let url = "https://meshtastic.org/e/#CgsSAQEoATABOgIIDQoPEgEBGgZJYmVyaWEoATABChESAQEaCEFDb3J1w3FhKAEwARIWCAEY-gEgCygFOANABkgBUBtoAcAGAQ";
-        let (kind, hash) = extract_hash(url).expect("a channel URL parses");
-        assert_eq!(kind, UrlKind::Channel);
-        assert!(hash.starts_with("CgsSAQEoATABOgIIDQoPEgEBGgZJYmVyaWEoATABChESAQEaCEFDb3J1w3FhKAEwARIWCAEY-gEgCygFOANABkgBUBtoAcAGAQ"));
+        let parts = extract_hash(url).expect("a channel URL parses");
+        assert_eq!(parts.kind, UrlKind::Channel);
+        assert!(!parts.add_only, "a plain URL replaces the channels");
+        assert!(parts.payload.starts_with("CgsSAQEoATABOgIIDQoPEgEBGgZJYmVyaWEoATABChESAQEaCEFDb3J1w3FhKAEwARIWCAEY-gEgCygFOANABkgBUBtoAcAGAQ"));
     }
 
     #[test]
     fn test_extract_hash_node_url() {
         let url =
             "https://meshtastic.org/v/#EhgSEEdhbGljaWEgQ2FsaWRhZGUaBPCfkJkaDA1Q89kZFRDn_voYAA";
-        let (kind, hash) = extract_hash(url).expect("a node URL parses");
-        assert_eq!(kind, UrlKind::Node);
+        let parts = extract_hash(url).expect("a node URL parses");
+        assert_eq!(parts.kind, UrlKind::Node);
         assert_eq!(
-            hash,
+            parts.payload,
             "EhgSEEdhbGljaWEgQ2FsaWRhZGUaBPCfkJkaDA1Q89kZFRDn_voYAA"
         );
     }
@@ -193,9 +308,9 @@ mod tests {
     #[test]
     fn test_extract_hash_without_hash() {
         let url = "CgsSAQEoATABOgIIDQoPEgEBGgZJYmVyaWEoATABChESAQEaCEFDb3J1w3FhKAEwARIWCAEY-gEgCygFOANABkgBUBtoAcAGAQ";
-        let (kind, hash) = extract_hash(url).expect("a bare base64 string parses");
-        assert_eq!(kind, UrlKind::Unknown);
-        assert_eq!(hash, url);
+        let parts = extract_hash(url).expect("a bare base64 string parses");
+        assert_eq!(parts.kind, UrlKind::Unknown);
+        assert_eq!(parts.payload, url);
     }
 
     #[test]
@@ -324,9 +439,9 @@ mod tests {
 
     #[test]
     fn test_decode_url_empty_hash() {
-        let (kind, hash) = extract_hash("https://meshtastic.org/e/#").expect("parses");
-        assert_eq!(kind, UrlKind::Channel);
-        assert_eq!(hash, "");
+        let parts = extract_hash("https://meshtastic.org/e/#").expect("parses");
+        assert_eq!(parts.kind, UrlKind::Channel);
+        assert_eq!(parts.payload, "");
 
         // ...but an empty payload is not a configuration.
         assert!(decode_url("https://meshtastic.org/e/#").is_err());

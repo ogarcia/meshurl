@@ -101,7 +101,14 @@ pub fn draw_decode_mode(f: &mut Frame, state: &mut DecodeDrawState) {
 
     let main_title = match state.config_result {
         Some(Ok(DecodeResult::Channel(config))) => {
-            format!(" 📋 Channels ({} found) ", config.channels.len())
+            // An `add=true` URL is imported into the free slots of a device
+            // rather than over its channel table, which is worth saying.
+            let import = if config.add_only {
+                " — added to the device's channels"
+            } else {
+                ""
+            };
+            format!(" 📋 Channels ({} found){} ", config.channels.len(), import)
         }
         Some(Ok(DecodeResult::Node(_))) => " 📇 Node ".to_string(),
         Some(Err(_)) => " 📋 Channels (error) ".to_string(),
@@ -582,6 +589,26 @@ mod tests {
             rendered.contains("Node URLs carry no LoRa config"),
             "the LoRa panel explains itself"
         );
+    }
+
+    #[test]
+    fn an_add_url_says_so_on_the_panel() {
+        let add_url = CHANNEL_URL.replace("/e/#", "/e/?add=true#");
+
+        let rendered = render(decode(&add_url));
+
+        assert!(rendered.contains("Channels (1 found)"), "the channels");
+        assert!(
+            rendered.contains("added to the device's channels"),
+            "and how they get there"
+        );
+    }
+
+    #[test]
+    fn a_plain_url_says_nothing_about_adding() {
+        let rendered = render(decode(CHANNEL_URL));
+
+        assert!(!rendered.contains("added to the device"));
     }
 
     #[test]

@@ -208,6 +208,13 @@ pub const MESHTASTIC_CHANNEL_URL_BASE: &str = "https://meshtastic.org/e/#";
 /// Base URL for Meshtastic node info URLs.
 pub const MESHTASTIC_NODE_URL_BASE: &str = "https://meshtastic.org/v/#";
 
+/// Base URL for a channel URL that adds to the channels a device already has.
+///
+/// Importing a plain channel URL replaces the whole channel table. With
+/// `add=true` each channel goes into the first free slot instead, as a
+/// secondary channel, and the ones already there are left alone.
+pub const MESHTASTIC_CHANNEL_ADD_URL_BASE: &str = "https://meshtastic.org/e/?add=true#";
+
 /// Node information decoded from a Meshtastic node info URL.
 ///
 /// This struct contains the information present in `/v/` URLs,
@@ -899,6 +906,13 @@ pub struct MeshtasticConfig {
     pub channels: Vec<ChannelInfo>,
     /// LoRa radio configuration (optional)
     pub lora: Option<LoRaInfo>,
+    /// Whether the URL adds these channels to the ones a device already has,
+    /// rather than replacing its channel table.
+    ///
+    /// The flag lives in the URL, as `?add=true`, not in the encoded payload:
+    /// the same channels can be shared either way. See
+    /// [`MESHTASTIC_CHANNEL_ADD_URL_BASE`].
+    pub add_only: bool,
 }
 
 impl MeshtasticConfig {
@@ -923,7 +937,13 @@ impl MeshtasticConfig {
 
         let lora = channel_set.lora_config.as_ref().map(LoRaInfo::from);
 
-        MeshtasticConfig { channels, lora }
+        // The payload says nothing about how it should be imported; the URL
+        // around it does, so the decoder sets this afterwards.
+        MeshtasticConfig {
+            channels,
+            lora,
+            add_only: false,
+        }
     }
 
     /// Creates a new empty MeshtasticConfig with no channels or LoRa settings.
@@ -931,6 +951,7 @@ impl MeshtasticConfig {
         MeshtasticConfig {
             channels: Vec::new(),
             lora: None,
+            add_only: false,
         }
     }
 }

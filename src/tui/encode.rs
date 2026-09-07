@@ -883,6 +883,11 @@ fn encode_keys(state: &EncodeDrawState) -> Vec<&'static str> {
     if has_channels {
         keys.push("[G] Generate");
     }
+    keys.push(if state.encode_config.add_only {
+        "[R] URL: adds"
+    } else {
+        "[R] URL: replaces"
+    });
     if state.encoded_url.is_some() {
         keys.push("[C] Copy");
     }
@@ -1024,7 +1029,11 @@ pub fn draw_encode_mode(f: &mut Frame, state: &mut EncodeDrawState) {
         f.render_widget(help, chunks[2]);
     }
 
-    let url_title = " 🔗 Generated URL ";
+    let url_title = if state.encode_config.add_only {
+        " 🔗 Generated URL — adds to the channels on the device "
+    } else {
+        " 🔗 Generated URL "
+    };
     let url_text = state
         .encoded_url
         .as_deref()
@@ -1358,6 +1367,26 @@ pub fn handle_encode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut 
                 Some(lora) => LoRaPopupState::from_lora(lora),
                 None => LoRaPopupState::new(),
             });
+        }
+        // Whether the URL replaces the channels on the device or is added to
+        // them. A URL already on screen is regenerated, so what is shown is
+        // always what the mode says.
+        KeyCode::Char('r') | KeyCode::Char('R') => {
+            state.encode_config.add_only = !state.encode_config.add_only;
+
+            if state.encoded_url.is_some() {
+                *state.encoded_url = Some(match encode_url(state.encode_config) {
+                    Ok(url) => url,
+                    Err(e) => format!("Error: {}", e),
+                });
+            }
+
+            let text = if state.encode_config.add_only {
+                "URL adds to the channels on the device"
+            } else {
+                "URL replaces the channels on the device"
+            };
+            show_toast(state.toast, text, true);
         }
         KeyCode::Char('g') | KeyCode::Char('G') => {
             if !state.encode_config.channels.is_empty() {
@@ -2236,6 +2265,7 @@ pub fn handle_popup_keys(
 mod tests {
     use super::*;
     use crate::tui::app::ActivePanel;
+    use meshurl::models::MESHTASTIC_CHANNEL_ADD_URL_BASE;
     use meshurl::models::MeshtasticConfig;
     use meshurl::regions::presets_for_region;
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -2481,6 +2511,70 @@ mod tests {
 
         encoder.press_shift(KeyCode::Delete);
         assert!(encoder.toast_text().contains("[U] to undo"));
+    }
+
+    #[test]
+    fn r_toggles_what_the_url_does_on_the_device() {
+        let mut encoder = Encoder::new(config_with_channels(1));
+        assert!(!encoder.config.add_only, "URLs replace by default");
+
+        encoder.press(KeyCode::Char('r'));
+        assert!(encoder.config.add_only);
+        assert!(encoder.toast_text().contains("adds"), "and it says so");
+
+        encoder.press(KeyCode::Char('R'));
+        assert!(!encoder.config.add_only);
+        assert!(encoder.toast_text().contains("replaces"));
+    }
+
+    #[test]
+    fn toggling_regenerates_the_url_on_screen() {
+        // Leaving the old URL up would show one thing and mean another.
+        let mut encoder = Encoder::new(config_with_channels(1));
+        encoder.press(KeyCode::Char('g'));
+        let replacing = encoder.encoded_url.clone().expect("a URL was generated");
+
+        encoder.press(KeyCode::Char('r'));
+
+        let adding = encoder.encoded_url.clone().expect("still a URL");
+        assert_ne!(adding, replacing);
+        assert!(
+            adding.starts_with(MESHTASTIC_CHANNEL_ADD_URL_BASE),
+            "{}",
+            adding
+        );
+    }
+
+    #[test]
+    fn toggling_with_no_url_yet_generates_nothing() {
+        let mut encoder = Encoder::new(config_with_channels(1));
+
+        encoder.press(KeyCode::Char('r'));
+
+        assert!(encoder.encoded_url.is_none(), "G is still what generates");
+    }
+
+    #[test]
+    fn generating_after_the_toggle_gives_an_add_url() {
+        let mut encoder = Encoder::new(config_with_channels(1));
+
+        encoder.press(KeyCode::Char('r'));
+        encoder.press(KeyCode::Char('g'));
+
+        let url = encoder.encoded_url.clone().expect("a URL was generated");
+        assert!(url.starts_with(MESHTASTIC_CHANNEL_ADD_URL_BASE), "{}", url);
+    }
+
+    #[test]
+    fn the_url_panel_says_what_the_url_will_do() {
+        let mut config = config_with_channels(1);
+
+        assert!(!render_encode(&config, false).contains("adds to the channels"));
+
+        config.add_only = true;
+        let screen = render_encode(&config, false);
+        assert!(screen.contains("adds to the channels"), "the panel title");
+        assert!(screen.contains("[R] URL: adds"), "and the footer");
     }
 
     /// Renders encode mode on a screen wide enough for the whole footer.

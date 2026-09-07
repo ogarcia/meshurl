@@ -4,6 +4,14 @@ use meshurl::models::{ChannelRole, LoRaInfo, MeshtasticConfig, MeshtasticDisplay
 pub fn print_config(config: &MeshtasticConfig) {
     print_channels(&config.channels);
 
+    if config.add_only {
+        println!(
+            "  {} {}\n",
+            "Import:".color(Color::White).bold(),
+            "adds these channels to the ones on the device".color(Color::BrightYellow)
+        );
+    }
+
     if let Some(lora) = &config.lora {
         print_lora(lora);
     }
@@ -252,15 +260,26 @@ pub fn print_encoded(config: &meshurl::models::MeshtasticConfig, short_url: &str
     let title = "Generated Configuration".color(Color::Cyan).bold();
     println!("{}\n", title);
 
-    print_urls(short_url, full_url);
+    print_urls(config, short_url, full_url);
     println!();
     print_config(config);
 }
 
-fn print_urls(short_url: &str, full_url: &str) {
+fn print_urls(config: &MeshtasticConfig, short_url: &str, full_url: &str) {
     let label = "URL:".color(Color::White).bold();
     println!("  {} {}", label, full_url.color(Color::BrightBlue));
 
     let label_short = "Short:".color(Color::White).bold();
     println!("  {} {}", label_short, short_url.color(Color::Blue));
+
+    // The short form has nowhere to put the query string, so it would be
+    // imported as a replacement.
+    if config.add_only {
+        println!(
+            "  {} {}",
+            "Note:".color(Color::White).bold(),
+            "only the full URL adds to the channels already on the device"
+                .color(Color::BrightYellow)
+        );
+    }
 }

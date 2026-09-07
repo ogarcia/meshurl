@@ -7,7 +7,8 @@ use prost::Message;
 
 use crate::errors::EncodeError;
 use crate::models::{
-    MESHTASTIC_CHANNEL_URL_BASE, MODEM_PRESETS, MeshtasticConfig, MeshtasticDisplay, REGION_CODES,
+    MESHTASTIC_CHANNEL_ADD_URL_BASE, MESHTASTIC_CHANNEL_URL_BASE, MODEM_PRESETS, MeshtasticConfig,
+    MeshtasticDisplay, REGION_CODES,
 };
 
 /// Encodes a MeshtasticConfig into a full URL.
@@ -16,19 +17,32 @@ use crate::models::{
 /// * `config` - The Meshtastic configuration to encode
 ///
 /// # Returns
-/// * `Ok(String)` - A full URL in the format https://meshtastic.org/e/#<base64>
+/// * `Ok(String)` - A full URL in the format https://meshtastic.org/e/#<base64>,
+///   or https://meshtastic.org/e/?add=true#<base64> when the configuration is
+///   marked [`add_only`](MeshtasticConfig::add_only)
 /// * `Err(EncodeError)` - If encoding fails
 pub fn encode_url(config: &MeshtasticConfig) -> Result<String, EncodeError> {
     let channel_set = create_channel_set(config)?;
     let encoded = encode_protobuf(&channel_set)?;
     let base64 = encode_base64(&encoded)?;
-    Ok(format!("{}{}", MESHTASTIC_CHANNEL_URL_BASE, base64))
+
+    let base = if config.add_only {
+        MESHTASTIC_CHANNEL_ADD_URL_BASE
+    } else {
+        MESHTASTIC_CHANNEL_URL_BASE
+    };
+
+    Ok(format!("{}{}", base, base64))
 }
 
 /// Encodes a MeshtasticConfig into a short URL (just the hash part).
 ///
 /// # Arguments
 /// * `config` - The Meshtastic configuration to encode
+///
+/// The short form carries no query string, so it cannot say whether the
+/// channels replace the ones on the device or are added to them: an
+/// [`add_only`](MeshtasticConfig::add_only) configuration needs the full URL.
 ///
 /// # Returns
 /// * `Ok(String)` - A short URL in the format #<base64>
@@ -96,8 +110,69 @@ fn encode_base64(data: &[u8]) -> Result<String, EncodeError> {
 #[allow(deprecated)]
 mod tests {
     use super::*;
-    use crate::models::{ChannelInfo, ChannelRole, DEFAULT_PSK, LoRaInfo, ModemConfig, PskType};
+    use crate::models::{
+        ChannelInfo, ChannelRole, DEFAULT_PSK, LoRaInfo, MESHTASTIC_CHANNEL_ADD_URL_BASE,
+        ModemConfig, PskType,
+    };
     use crate::protobufs::config::lo_ra_config::{ModemPreset, RegionCode};
+
+    /// A plain primary channel to hang a configuration on.
+    fn default_channel() -> ChannelInfo {
+        ChannelInfo {
+            index: 0,
+            role: ChannelRole::Primary,
+            name: "TestChannel".to_string(),
+            psk: DEFAULT_PSK.to_string(),
+            psk_type: PskType::Default,
+            uplink_enabled: true,
+            downlink_enabled: true,
+            position_precision: None,
+            is_client_muted: false,
+        }
+    }
+
+    #[test]
+    fn an_add_configuration_encodes_to_an_add_url() {
+        let mut config = MeshtasticConfig::new();
+        config.channels.push(default_channel());
+        config.add_only = true;
+
+        let url = encode_url(&config).expect("the configuration encodes");
+
+        assert!(
+            url.starts_with(MESHTASTIC_CHANNEL_ADD_URL_BASE),
+            "{} is not an add URL",
+            url
+        );
+    }
+
+    #[test]
+    fn the_payload_is_the_same_either_way() {
+        // The flag lives in the URL, not in the encoded channels.
+        let mut config = MeshtasticConfig::new();
+        config.channels.push(default_channel());
+
+        let replacing = encode_url_short(&config).expect("encodes");
+        config.add_only = true;
+        let adding = encode_url_short(&config).expect("encodes");
+
+        assert_eq!(replacing, adding, "the short form carries no flag");
+    }
+
+    #[test]
+    fn an_add_url_survives_a_round_trip() {
+        let mut config = MeshtasticConfig::new();
+        config.channels.push(default_channel());
+        config.add_only = true;
+
+        let url = encode_url(&config).expect("encodes");
+        match crate::decoder::decode_url(&url).expect("decodes") {
+            crate::decoder::DecodeResult::Channel(decoded) => {
+                assert!(decoded.add_only, "still an add URL");
+            }
+            crate::decoder::DecodeResult::Node(_) => panic!("expected a channel URL"),
+        }
+    }
 
     #[test]
     fn test_encode_empty_config() {
