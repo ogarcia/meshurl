@@ -8,7 +8,11 @@ adheres to [Semantic Versioning][semver].
 [keepachangelog]: https://keepachangelog.com/en/1.1.0/
 [semver]: https://semver.org/spec/v2.0.0.html
 
-## [0.6.0] - unreleased
+## [0.6.0] - 2026-09-07
+
+Mostly about not losing work: the keys that destroy something now do the small
+thing by default, and there is an undo for when they do not. Channel URLs can
+also add to a device rather than replace it.
 
 ### Added
 
