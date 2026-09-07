@@ -30,6 +30,11 @@ adheres to [Semantic Versioning][semver].
 - Deleting a channel needs the channel list focused, which is the only place
   the footer offers it. The selection survives a panel switch, so a `D` typed
   anywhere in encode mode used to take a channel with it.
+- The footer takes as many lines as its key hints need, up to three, instead
+  of one line that cut the tail off. It already ran past 128 columns before
+  these keys were added, so `[Q] Quit` was off the screen on any ordinary
+  terminal. A screen wide enough for one line still gets one: the row is not
+  spent unless the hints need it.
 - The detail beside each entry of a list overlay lines up in a column, so a
   list of names of uneven length still reads down the page.
 - The arm64 binary is built on a native arm64 runner instead of through

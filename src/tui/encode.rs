@@ -19,7 +19,7 @@ use std::process::{Command, Stdio};
 
 use crate::tui::app::{ActivePanel, EncodeDrawState, EncodeState, ToastMessage};
 use crate::tui::widgets::{
-    centered_popup, channel_list_item, channel_scroll_indicator, channel_total_lines,
+    centered_popup, channel_list_item, channel_scroll_indicator, channel_total_lines, footer_lines,
     lora_info_lines, lora_scroll_info, text_width, truncate_to_columns,
 };
 
@@ -848,7 +848,59 @@ fn get_popup_fields(psk_mode: PskModeKind) -> Vec<&'static str> {
     fields
 }
 
+/// The key hints for encode mode, most useful first.
+///
+/// Only lists what the focused panel can actually do right now, and the order
+/// matters: a narrow terminal drops the tail.
+fn encode_keys(state: &EncodeDrawState) -> Vec<&'static str> {
+    let mut keys: Vec<&str> = vec!["[1] Decode", "[2] Encode", "[Tab/Shift+Tab] Switch"];
+
+    let has_channels = !state.encode_config.channels.is_empty();
+
+    if state.active_panel == ActivePanel::Channels {
+        if state.encode_config.channels.len() < MAX_CHANNELS {
+            keys.push("[A] Add");
+        }
+        if has_channels {
+            keys.push("[Enter] Edit");
+            keys.push("[D/Del] Delete");
+        }
+        if state.encode_config.channels.len() >= 2 {
+            keys.push("[+]/[-] Move");
+        }
+    } else if state.active_panel != ActivePanel::Lora
+        && state.encode_config.channels.len() < MAX_CHANNELS
+    {
+        keys.push("[A] Add");
+    }
+
+    if state.can_undo {
+        keys.push("[U] Undo");
+    }
+
+    keys.push("[E] LoRa");
+
+    if has_channels {
+        keys.push("[G] Generate");
+    }
+    if state.encoded_url.is_some() {
+        keys.push("[C] Copy");
+    }
+
+    if has_channels || state.encode_config.lora.is_some() {
+        keys.push("[Shift+Del] Clear all");
+    }
+    keys.push("[Q] Quit");
+
+    keys
+}
+
 pub fn draw_encode_mode(f: &mut Frame, state: &mut EncodeDrawState) {
+    // The hints are packed first: how many lines they need decides the height
+    // the footer asks the layout for, so a wide terminal keeps the row that a
+    // fixed two-line footer would have cost it.
+    let footer = footer_lines(&encode_keys(state), f.area().width);
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -856,7 +908,7 @@ pub fn draw_encode_mode(f: &mut Frame, state: &mut EncodeDrawState) {
             Constraint::Min(10),
             Constraint::Min(6),
             Constraint::Length(3),
-            Constraint::Length(1),
+            Constraint::Length(footer.len() as u16),
         ])
         .split(f.area());
 
@@ -995,49 +1047,7 @@ pub fn draw_encode_mode(f: &mut Frame, state: &mut EncodeDrawState) {
     );
     f.render_widget(url_para, chunks[3]);
 
-    // Only list what the focused panel can actually do right now.
-    let mut keys: Vec<&str> = vec!["[1] Decode", "[2] Encode", "[Tab/Shift+Tab] Switch"];
-
-    let has_channels = !state.encode_config.channels.is_empty();
-
-    if state.active_panel == ActivePanel::Channels {
-        if state.encode_config.channels.len() < MAX_CHANNELS {
-            keys.push("[A] Add");
-        }
-        if has_channels {
-            keys.push("[Enter] Edit");
-            keys.push("[D/Del] Delete");
-        }
-        if state.encode_config.channels.len() >= 2 {
-            keys.push("[+]/[-] Move");
-        }
-    } else if state.active_panel != ActivePanel::Lora
-        && state.encode_config.channels.len() < MAX_CHANNELS
-    {
-        keys.push("[A] Add");
-    }
-
-    if state.can_undo {
-        keys.push("[U] Undo");
-    }
-
-    keys.push("[E] LoRa");
-
-    if has_channels {
-        keys.push("[G] Generate");
-    }
-    if state.encoded_url.is_some() {
-        keys.push("[C] Copy");
-    }
-
-    if has_channels || state.encode_config.lora.is_some() {
-        keys.push("[Shift+Del] Clear all");
-    }
-    keys.push("[Q] Quit");
-
-    let footer_text = keys.join("  ");
-
-    let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::DarkGray));
+    let footer = Paragraph::new(footer.join("\n")).style(Style::default().fg(Color::DarkGray));
     f.render_widget(footer, chunks[4]);
 
     if let Some(lora_state) = state.lora_popup {
@@ -2473,14 +2483,24 @@ mod tests {
         assert!(encoder.toast_text().contains("[U] to undo"));
     }
 
-    /// Renders encode mode and returns the text on screen.
+    /// Renders encode mode on a screen wide enough for the whole footer.
     fn render_encode(config: &MeshtasticConfig, can_undo: bool) -> String {
+        render_encode_at(config, can_undo, 160, 30)
+    }
+
+    /// Renders encode mode at a given size and returns the text on screen.
+    fn render_encode_at(
+        config: &MeshtasticConfig,
+        can_undo: bool,
+        width: u16,
+        height: u16,
+    ) -> String {
         let mut list_state = ListState::default();
         let mut lora_max_scroll = 0;
         let encoded_url = None;
         let lora_popup = None;
-        // Wide enough for the whole footer, which a real terminal cuts short.
-        let mut terminal = Terminal::new(TestBackend::new(160, 30)).expect("test backend starts");
+        let mut terminal =
+            Terminal::new(TestBackend::new(width, height)).expect("test backend starts");
 
         terminal
             .draw(|f| {
@@ -2513,6 +2533,34 @@ mod tests {
 
         assert!(screen.contains("[D/Del] Delete"), "the one channel");
         assert!(screen.contains("[Shift+Del] Clear all"), "and the lot");
+    }
+
+    #[test]
+    fn every_key_is_listed_on_a_narrow_screen() {
+        // The footer takes the lines it needs, so nothing is cut off a screen
+        // that has room for it on more than one line.
+        let mut config = config_with_channels(2);
+        config.lora = Some(LoRaPopupState::new().to_lora_info());
+
+        let screen = render_encode_at(&config, true, 80, 30);
+
+        for key in [
+            "[D/Del] Delete",
+            "[U] Undo",
+            "[Shift+Del] Clear all",
+            "[Q] Quit",
+        ] {
+            assert!(screen.contains(key), "{} is listed", key);
+        }
+    }
+
+    #[test]
+    fn encode_mode_renders_on_a_tiny_screen() {
+        // The footer asks the layout for as many lines as the hints need,
+        // which must not upset a screen with no room for them.
+        for (width, height) in [(1, 1), (3, 3), (20, 6), (40, 12)] {
+            render_encode_at(&config_with_channels(2), true, width, height);
+        }
     }
 
     #[test]

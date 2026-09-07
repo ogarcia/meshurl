@@ -120,6 +120,9 @@ The TUI has two modes:
 mistyped key costs one channel rather than the lot. Either way `U` puts back
 what went, one step deep, and the notification says so when it happens.
 
+The footer at the bottom lists the keys the focused panel accepts, on as many
+lines as they need for the width of the terminal.
+
 #### Channel Popup
 
 | Key | Action |

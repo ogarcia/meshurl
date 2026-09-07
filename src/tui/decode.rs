@@ -10,11 +10,15 @@ use ratatui_textarea::TextArea;
 
 use crate::tui::app::{ActivePanel, DecodeDrawState, DecodeState};
 use crate::tui::widgets::{
-    channel_list_item, channel_scroll_indicator, channel_total_lines, lora_info_lines,
-    lora_scroll_info, node_info_lines,
+    channel_list_item, channel_scroll_indicator, channel_total_lines, footer_lines,
+    lora_info_lines, lora_scroll_info, node_info_lines,
 };
 
 pub fn draw_decode_mode(f: &mut Frame, state: &mut DecodeDrawState) {
+    // Packed before the layout: the lines they need decide the footer height,
+    // so a wide terminal keeps the row a taller footer would have cost it.
+    let footer = footer_lines(&decode_keys(state), f.area().width);
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -22,7 +26,7 @@ pub fn draw_decode_mode(f: &mut Frame, state: &mut DecodeDrawState) {
             Constraint::Length(3),
             Constraint::Min(12),
             Constraint::Min(6),
-            Constraint::Length(1),
+            Constraint::Length(footer.len() as u16),
         ])
         .split(f.area());
 
@@ -204,11 +208,18 @@ pub fn draw_decode_mode(f: &mut Frame, state: &mut DecodeDrawState) {
         }
     }
 
+    let footer = Paragraph::new(footer.join("\n")).style(Style::default().fg(Color::DarkGray));
+    f.render_widget(footer, chunks[4]);
+}
+
+/// The key hints for decode mode, most useful first.
+///
+/// Only lists keys that do something on the focused panel: the footer used to
+/// advertise [M] with nothing decoded, and cover a panel this mode never
+/// focuses. The order matters, as a narrow terminal drops the tail.
+fn decode_keys(state: &DecodeDrawState) -> Vec<&'static str> {
     let has_valid_config = matches!(state.config_result, Some(Ok(_)));
 
-    // Only list keys that do something on the focused panel: the previous
-    // footer advertised [M] with nothing decoded and covered a panel that this
-    // mode never focuses.
     let mut keys: Vec<&str> = vec!["[1] Decode", "[2] Encode"];
 
     match state.active_panel {
@@ -235,10 +246,7 @@ pub fn draw_decode_mode(f: &mut Frame, state: &mut DecodeDrawState) {
         }
     }
 
-    let footer_text = keys.join("  ");
-
-    let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::DarkGray));
-    f.render_widget(footer, chunks[4]);
+    keys
 }
 
 pub fn handle_decode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut DecodeState) {
@@ -499,6 +507,10 @@ mod tests {
     }
 
     fn render(result: Option<Result<DecodeResult, String>>) -> String {
+        render_at(result, 100, 40)
+    }
+
+    fn render_at(result: Option<Result<DecodeResult, String>>, width: u16, height: u16) -> String {
         let mut channels_list_state = ListState::default();
         let mut lora_max_scroll = 0;
         let textarea = TextArea::default();
@@ -513,7 +525,8 @@ mod tests {
             lora_max_scroll: &mut lora_max_scroll,
         };
 
-        let mut terminal = Terminal::new(TestBackend::new(100, 40)).expect("test backend starts");
+        let mut terminal =
+            Terminal::new(TestBackend::new(width, height)).expect("test backend starts");
         terminal
             .draw(|f| draw_decode_mode(f, &mut draw_state))
             .expect("decode mode renders");
@@ -525,6 +538,25 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect()
+    }
+
+    #[test]
+    fn the_footer_takes_the_lines_its_hints_need() {
+        // One line on a wide screen, so the row is not spent for nothing, and
+        // as many as it takes on a narrow one rather than cutting hints off.
+        for width in [120, 80, 60] {
+            let screen = render_at(None, width, 40);
+            for key in ["[Shift+Del] Clear all", "[Q] Quit"] {
+                assert!(screen.contains(key), "{} is listed at width {}", key, width);
+            }
+        }
+    }
+
+    #[test]
+    fn decode_mode_renders_on_a_tiny_screen() {
+        for (width, height) in [(1, 1), (3, 3), (20, 6), (40, 12)] {
+            render_at(None, width, height);
+        }
     }
 
     #[test]

@@ -125,6 +125,50 @@ pub fn text_width(text: &str) -> usize {
     Line::from(text).width()
 }
 
+/// Lines the key hints are packed into, longest a footer may grow to.
+///
+/// Below about fifty columns even three lines are not enough, and a footer
+/// taller than this would take the screen from the panels it describes.
+pub const FOOTER_MAX_LINES: usize = 3;
+
+/// Packs the key hints into lines no wider than `width`.
+///
+/// A single line is used whenever the hints fit on one, so a wide terminal
+/// keeps the row the extra lines would have cost. Entries are never split, and
+/// anything past [`FOOTER_MAX_LINES`] is dropped: it could not be read anyway,
+/// so the hints are listed most useful first.
+pub fn footer_lines(keys: &[&str], width: u16) -> Vec<String> {
+    /// Columns between two hints.
+    const GAP: usize = 2;
+
+    let width = width as usize;
+    let mut lines: Vec<String> = Vec::new();
+    let mut used = 0;
+
+    for key in keys {
+        let key_width = text_width(key);
+
+        match lines.last_mut() {
+            // Keep it on this line while it fits. An entry wider than the
+            // terminal goes on a line of its own and is clipped there.
+            Some(line) if used + GAP + key_width <= width => {
+                line.push_str("  ");
+                line.push_str(key);
+                used += GAP + key_width;
+            }
+            _ => {
+                if lines.len() == FOOTER_MAX_LINES {
+                    break;
+                }
+                lines.push((*key).to_string());
+                used = key_width;
+            }
+        }
+    }
+
+    lines
+}
+
 /// Shortens `text` to `max_columns` terminal columns, marking the cut with an
 /// ellipsis.
 ///
@@ -552,6 +596,101 @@ pub fn channel_list_item(index: usize, channel: &ChannelInfo) -> ListItem<'_> {
 mod tests {
     use super::*;
     use ratatui::{Terminal, backend::TestBackend};
+
+    /// The hints of a busy encode screen, in the order the footer lists them.
+    const FOOTER_KEYS: &[&str] = &[
+        "[1] Decode",
+        "[2] Encode",
+        "[Tab/Shift+Tab] Switch",
+        "[A] Add",
+        "[Enter] Edit",
+        "[D/Del] Delete",
+        "[U] Undo",
+        "[Q] Quit",
+    ];
+
+    #[test]
+    fn a_wide_terminal_keeps_the_footer_on_one_line() {
+        let lines = footer_lines(FOOTER_KEYS, 200);
+
+        assert_eq!(lines.len(), 1, "no row is spent on a second line");
+        assert_eq!(lines[0], FOOTER_KEYS.join("  "));
+    }
+
+    #[test]
+    fn a_narrow_terminal_gets_more_lines() {
+        let lines = footer_lines(FOOTER_KEYS, 60);
+
+        assert!(lines.len() > 1, "the hints did not fit on one line");
+        for line in &lines {
+            assert!(
+                text_width(line) <= 60,
+                "{:?} is wider than the terminal",
+                line
+            );
+        }
+    }
+
+    #[test]
+    fn no_hint_is_split_across_lines() {
+        // Wrapping on whitespace would break "[Enter] Edit" in half.
+        for width in 20..=200 {
+            let lines = footer_lines(FOOTER_KEYS, width);
+            let packed: Vec<&str> = lines
+                .iter()
+                .flat_map(|line| line.split("  "))
+                .filter(|entry| !entry.is_empty())
+                .collect();
+
+            for entry in &packed {
+                assert!(
+                    FOOTER_KEYS.contains(entry),
+                    "{:?} is not a whole hint, at width {}",
+                    entry,
+                    width
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_hint_survives_a_terminal_wide_enough_for_them() {
+        for width in 60..=200 {
+            let listed = footer_lines(FOOTER_KEYS, width).join("  ");
+            for key in FOOTER_KEYS {
+                assert!(
+                    listed.contains(key),
+                    "{} went missing at width {}",
+                    key,
+                    width
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_footer_stops_growing() {
+        // Past this the hints cannot be read anyway, and a taller footer would
+        // take the screen from the panels it describes.
+        let lines = footer_lines(FOOTER_KEYS, 12);
+
+        assert_eq!(lines.len(), FOOTER_MAX_LINES);
+    }
+
+    #[test]
+    fn a_hint_wider_than_the_terminal_gets_its_own_line() {
+        let lines = footer_lines(&["[Tab/Shift+Tab] Switch", "[Q] Quit"], 10);
+
+        assert_eq!(lines, ["[Tab/Shift+Tab] Switch", "[Q] Quit"]);
+    }
+
+    #[test]
+    fn the_hints_are_measured_in_columns_not_bytes() {
+        // The arrows in decode mode are three bytes each and one column wide.
+        let lines = footer_lines(&["[\u{2191}\u{2193}] Scroll", "[Q] Quit"], 22);
+
+        assert_eq!(lines.len(), 1, "both fit in 22 columns");
+    }
 
     fn toast(text: &str) -> ToastMessage {
         ToastMessage::new(text, true, false)
