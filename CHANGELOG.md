@@ -10,6 +10,18 @@ adheres to [Semantic Versioning][semver].
 
 ## [0.6.0] - unreleased
 
+### Added
+
+- Enter on the channel popup's PSK Mode and Position opens a list of every
+  value, as the LoRa popup already did for Region, Modem and Hop Limit. Each
+  entry carries what it does: what a PSK mode makes of the key, and the
+  precision in bits a position is rounded to.
+
+### Changed
+
+- The detail beside each entry of a list overlay lines up in a column, so a
+  list of names of uneven length still reads down the page.
+
 ### Fixed
 
 - Esc in the channel name box closed the whole popup instead of just the box,

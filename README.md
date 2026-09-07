@@ -121,17 +121,21 @@ The TUI has two modes:
 | --- | --- |
 | `↑` / `↓` | Navigate fields |
 | `←` / `→` / `Space` | Cycle field value |
-| `Enter` | Save / Edit name/PSK |
-| `Esc` | Cancel and close |
+| `Enter` | Open the field, or save |
+| `Esc` | Close the open field, or cancel and close |
+
+`Enter` opens what the field needs: a list to pick from for PSK Mode and
+Position, and a box to type into for Name and PSK. `Esc` closes it again
+without taking the value, leaving the rest of the channel alone.
 
 Fields:
-- **Name**: Channel name (up to 30 chars)
+- **Name**: Channel name (up to 12 bytes, as the firmware stores)
 - **PSK Mode**: Default, None, Random, Base64, Passphrase
 - **PSK**: Pre-shared key (when Base64 or Passphrase mode)
 - **Uplink**: Enable uplink messages
 - **Downlink**: Enable downlink messages
-- **Position**: GPS position precision (0-3)
-- **Muted**: Disable audio notifications
+- **Position**: Position precision, from disabled to exact GPS
+- **Muted**: Do not notify on this channel
 
 #### LoRa Configuration Popup
 
@@ -139,17 +143,20 @@ Fields:
 | --- | --- |
 | `↑` / `↓` | Navigate fields |
 | `←` / `→` / `Space` | Cycle field value |
-| `Enter` | Save |
-| `Esc` | Cancel and close |
+| `Enter` | Open the field, or save |
+| `Esc` | Close the open field, or cancel and close |
+
+`Enter` opens a list of every value for Region, Modem and Hop Limit, and a box
+to type into for TX Power, Channel and the two frequencies.
 
 Fields:
-- **Region**: US, EU433, EU868, CN, JP, ANZ, KR, TW, RU, IN, NZ865, TH, Lora24, UA433, UA868
-- **Modem Preset**: LongFast, LongSlow, VeryLongSlow, MediumSlow, MediumFast, ShortSlow, ShortFast, LongModerate, ShortTurbo
+- **Region**: every region the firmware defines, `UNSET` included
+- **Modem**: every modem preset, plus `Custom` for parameters set by hand
+- **Bandwidth**, **Spread Factor**, **Coding Rate**: only with `Custom`
 - **TX Power**: 0-30 dBm (0 = default)
 - **Hop Limit**: 1-7 (default 3)
 - **Channel**: 0-255 (0 = auto)
 - **TX Enabled**: Enable transmission
-- **Use Preset**: Use modem preset settings
 - **Override Freq**: Custom frequency (MHz)
 - **Freq Offset**: Frequency offset (-100 to 100 kHz)
 - **SX126x RX**: Boost receive sensitivity

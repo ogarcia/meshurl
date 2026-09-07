@@ -20,7 +20,7 @@ use std::process::{Command, Stdio};
 use crate::tui::app::{ActivePanel, EncodeDrawState, EncodeState, ToastMessage};
 use crate::tui::widgets::{
     centered_popup, channel_list_item, channel_scroll_indicator, channel_total_lines,
-    lora_info_lines, lora_scroll_info, truncate_to_columns,
+    lora_info_lines, lora_scroll_info, text_width, truncate_to_columns,
 };
 
 /// Channels a Meshtastic configuration can hold.
@@ -73,6 +73,17 @@ impl PskModeKind {
         matches!(self, PskModeKind::Base64 | PskModeKind::Passphrase)
     }
 
+    /// What the mode does with the channel key, for the list overlay.
+    fn description(self) -> &'static str {
+        match self {
+            PskModeKind::Default => "well-known public key",
+            PskModeKind::None => "no encryption",
+            PskModeKind::Random => "a fresh AES-256 key",
+            PskModeKind::Passphrase => "hashed from a phrase",
+            PskModeKind::Base64 => "a key you type in",
+        }
+    }
+
     /// Returns the next or previous mode, wrapping around.
     fn cycle(self, forward: bool) -> Self {
         let modes = Self::ALL;
@@ -114,6 +125,9 @@ pub struct ChannelPopupState {
     pub name_textarea: TextArea<'static>,
     pub editing_psk: bool,
     pub psk_textarea: TextArea<'static>,
+    /// The open list overlay, if the PSK mode or the position is being picked
+    /// from one.
+    pub list_popup: Option<ListPopupState>,
 }
 
 /// What the "Modem" field of the LoRa popup is showing.
@@ -150,11 +164,17 @@ impl ModemChoice {
 ///
 /// Cycling with the arrow keys is fine for a handful of options, but there are
 /// 37 regions: the overlay shows them all at once so one can be found by eye.
+///
+/// Both popups share the overlay, so each handler acts on its own choices and
+/// leaves the others alone: `Region`, `Modem` and `HopLimit` belong to the LoRa
+/// popup, `PskMode` and `Position` to the channel popup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ListChoice {
     Region,
     Modem,
     HopLimit,
+    PskMode,
+    Position,
 }
 
 /// A numeric field being typed into.
@@ -294,6 +314,8 @@ impl ListPopupState {
             ListChoice::Region => REGION_CODES.len(),
             ListChoice::Modem => ModemChoice::all().len(),
             ListChoice::HopLimit => HOP_LIMITS.len(),
+            ListChoice::PskMode => PskModeKind::ALL.len(),
+            ListChoice::Position => POSITION_OPTIONS.len(),
         }
     }
 
@@ -329,6 +351,23 @@ impl ListPopupState {
                     (choice.name().to_string(), detail)
                 })
                 .collect(),
+            ListChoice::PskMode => PskModeKind::ALL
+                .iter()
+                .map(|mode| (mode.to_string(), mode.description().to_string()))
+                .collect(),
+            // The names are the area a position is rounded to; the detail is
+            // the precision in bits, which is what the URL carries.
+            ListChoice::Position => POSITION_OPTIONS
+                .iter()
+                .map(|(name, precision)| {
+                    let detail = match precision {
+                        0 => "no position shared".to_string(),
+                        32 => "exact GPS position".to_string(),
+                        bits => format!("{} bits", bits),
+                    };
+                    (name.to_string(), detail)
+                })
+                .collect(),
         }
     }
 
@@ -337,6 +376,8 @@ impl ListPopupState {
             ListChoice::Region => " Region ",
             ListChoice::Modem => " Modem ",
             ListChoice::HopLimit => " Hop Limit ",
+            ListChoice::PskMode => " PSK Mode ",
+            ListChoice::Position => " Position ",
         }
     }
 }
@@ -563,6 +604,7 @@ impl ChannelPopupState {
             name_textarea,
             editing_psk: false,
             psk_textarea,
+            list_popup: None,
         }
     }
 
@@ -596,6 +638,7 @@ impl ChannelPopupState {
             name_textarea,
             editing_psk: false,
             psk_textarea,
+            list_popup: None,
         }
     }
 
@@ -1108,7 +1151,8 @@ pub fn handle_encode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut 
 
         // Esc closes one layer at a time: an overlay consumes its own, and only
         // a popup with nothing on top of it closes here.
-        let overlay_was_open = popup.editing_name || popup.editing_psk;
+        let overlay_was_open =
+            popup.editing_name || popup.editing_psk || popup.list_popup.is_some();
 
         let result = handle_popup_keys(key, popup, state.toast);
 
@@ -1423,6 +1467,10 @@ pub fn draw_channel_popup(f: &mut Frame, state: &ChannelPopupState) {
         textarea.set_block(Block::default().borders(Borders::NONE));
         f.render_widget(&textarea, input_rect);
     }
+
+    if let Some(list_state) = &state.list_popup {
+        draw_list_popup(f, list_state, area);
+    }
 }
 
 pub fn draw_lora_popup(f: &mut Frame, state: &LoRaPopupState, area: ratatui::layout::Rect) {
@@ -1579,13 +1627,23 @@ pub fn draw_list_popup(f: &mut Frame, state: &ListPopupState, area: Rect) {
                 .add_modifier(ratatui::style::Modifier::BOLD),
         );
 
+    // The details line up in a column of their own, so a list of names of
+    // uneven length still reads down the page.
+    let name_columns = entries
+        .iter()
+        .filter(|(_, detail)| !detail.is_empty())
+        .map(|(name, _)| text_width(name))
+        .max()
+        .unwrap_or(0);
+
     let items: Vec<ListItem> = entries
         .iter()
         .map(|(name, detail)| {
             let mut spans = vec![Span::raw(format!(" {}", name))];
             if !detail.is_empty() {
+                let padding = " ".repeat(name_columns.saturating_sub(text_width(name)));
                 spans.push(Span::styled(
-                    format!("  {}", detail),
+                    format!("{}  {}", padding, detail),
                     Style::default().fg(Color::DarkGray),
                 ));
             }
@@ -1661,6 +1719,8 @@ pub fn handle_lora_popup_keys(
                             state.hop_limit = *hops;
                         }
                     }
+                    // The rest belong to the channel popup.
+                    ListChoice::PskMode | ListChoice::Position => {}
                 }
             }
             KeyCode::Esc => state.list_popup = None,
@@ -1952,6 +2012,44 @@ pub fn handle_popup_keys(
         return None;
     }
 
+    // The list overlay owns the keyboard while it is open.
+    if let Some(list) = state.list_popup.as_mut() {
+        match key.code {
+            KeyCode::Up => {
+                list.selected = list.selected.saturating_sub(1);
+            }
+            KeyCode::Down => {
+                list.selected = (list.selected + 1).min(list.len().saturating_sub(1));
+            }
+            KeyCode::Home => list.selected = 0,
+            KeyCode::End => list.selected = list.len().saturating_sub(1),
+            KeyCode::Enter => {
+                let list = state.list_popup.take().expect("the overlay is open");
+                match list.choice {
+                    ListChoice::PskMode => {
+                        if let Some(mode) = PskModeKind::ALL.get(list.selected)
+                            && *mode != state.psk_mode
+                        {
+                            state.psk_mode = *mode;
+                            // The value belongs to the mode that was just left.
+                            state.psk_value.clear();
+                        }
+                    }
+                    ListChoice::Position => {
+                        if list.selected < POSITION_OPTIONS.len() {
+                            state.position_index = list.selected;
+                        }
+                    }
+                    // The rest belong to the LoRa popup.
+                    ListChoice::Region | ListChoice::Modem | ListChoice::HopLimit => {}
+                }
+            }
+            KeyCode::Esc => state.list_popup = None,
+            _ => {}
+        }
+        return None;
+    }
+
     let is_enter = matches!(key.code, KeyCode::Enter);
     let cycle_forward = matches!(key.code, KeyCode::Right | KeyCode::Char(' '));
     let cycle_backward = matches!(key.code, KeyCode::Left);
@@ -2010,26 +2108,41 @@ pub fn handle_popup_keys(
                     None
                 }
                 "PSK Mode" => {
-                    if cycle_forward || cycle_backward {
+                    if is_enter {
+                        let current = PskModeKind::ALL
+                            .iter()
+                            .position(|mode| *mode == state.psk_mode)
+                            .unwrap_or(0);
+                        state.list_popup = Some(ListPopupState::new(ListChoice::PskMode, current));
+                    } else {
                         state.psk_mode = state.psk_mode.cycle(cycle_forward);
                         // The value belongs to the mode that was just left.
                         state.psk_value.clear();
                     }
                     None
                 }
-                "Uplink" | "Downlink" | "Position" | "Muted" => {
+                "Position" => {
+                    if is_enter {
+                        state.list_popup = Some(ListPopupState::new(
+                            ListChoice::Position,
+                            state.position_index,
+                        ));
+                    } else {
+                        let len = POSITION_OPTIONS.len();
+                        state.position_index = if cycle_forward {
+                            (state.position_index + 1) % len
+                        } else {
+                            (state.position_index + len - 1) % len
+                        };
+                    }
+                    None
+                }
+                "Uplink" | "Downlink" | "Muted" => {
                     if cycle_forward || cycle_backward {
                         if field == "Uplink" {
                             state.uplink_enabled = !state.uplink_enabled;
                         } else if field == "Downlink" {
                             state.downlink_enabled = !state.downlink_enabled;
-                        } else if field == "Position" {
-                            let len = POSITION_OPTIONS.len();
-                            if cycle_forward {
-                                state.position_index = (state.position_index + 1) % len;
-                            } else {
-                                state.position_index = (state.position_index + len - 1) % len;
-                            }
                         } else if field == "Muted" {
                             state.muted = !state.muted;
                         }
@@ -2352,6 +2465,217 @@ mod tests {
         }
     }
 
+    fn channel_key(popup: &mut ChannelPopupState, code: KeyCode) -> Option<(usize, ChannelInfo)> {
+        handle_popup_keys(KeyEvent::from(code), popup, &mut None)
+    }
+
+    /// Moves the channel popup selection onto the named field.
+    fn focus_channel_field(popup: &mut ChannelPopupState, field: &str) {
+        popup.selected_field = get_popup_fields(popup.psk_mode)
+            .iter()
+            .position(|candidate| *candidate == field)
+            .unwrap_or_else(|| panic!("{} is not a channel field", field));
+    }
+
+    /// Renders a channel popup, overlays included, and returns the text on
+    /// screen.
+    fn render_channel(popup: &ChannelPopupState) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(80, 40)).expect("test backend starts");
+        terminal
+            .draw(|f| draw_channel_popup(f, popup))
+            .expect("the popup renders");
+
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn enter_opens_the_psk_mode_list_on_the_current_mode() {
+        let mut popup = ChannelPopupState::new();
+        popup.psk_mode = PskModeKind::Random;
+        focus_channel_field(&mut popup, "PSK Mode");
+
+        channel_key(&mut popup, KeyCode::Enter);
+
+        let list = popup.list_popup.as_ref().expect("the list opened");
+        assert_eq!(list.choice, ListChoice::PskMode);
+        assert_eq!(
+            PskModeKind::ALL[list.selected],
+            PskModeKind::Random,
+            "opens on the mode in use"
+        );
+    }
+
+    #[test]
+    fn the_psk_mode_list_picks_a_value() {
+        let mut popup = ChannelPopupState::new();
+        focus_channel_field(&mut popup, "PSK Mode");
+        channel_key(&mut popup, KeyCode::Enter);
+
+        channel_key(&mut popup, KeyCode::End);
+        channel_key(&mut popup, KeyCode::Enter);
+
+        assert!(popup.list_popup.is_none(), "the list closed");
+        assert_eq!(popup.psk_mode, PskModeKind::Passphrase);
+        // The mode needs a value, so the field to type it into appears.
+        assert!(get_popup_fields(popup.psk_mode).contains(&"PSK"));
+    }
+
+    #[test]
+    fn picking_another_mode_from_the_list_clears_the_stale_value() {
+        // The value belongs to the mode it was typed for: a base64 key left
+        // behind would be hashed as if it were a passphrase.
+        let mut popup = popup_with_psk(PskModeKind::Base64, VALID_PSK);
+        focus_channel_field(&mut popup, "PSK Mode");
+        channel_key(&mut popup, KeyCode::Enter);
+        channel_key(&mut popup, KeyCode::End);
+
+        channel_key(&mut popup, KeyCode::Enter);
+
+        assert_eq!(popup.psk_mode, PskModeKind::Passphrase);
+        assert!(popup.psk_value.is_empty(), "the base64 key was dropped");
+    }
+
+    #[test]
+    fn picking_the_mode_already_in_use_keeps_its_value() {
+        let mut popup = popup_with_psk(PskModeKind::Base64, VALID_PSK);
+        focus_channel_field(&mut popup, "PSK Mode");
+        channel_key(&mut popup, KeyCode::Enter);
+
+        // The list opens on Base64, so Enter chooses it again.
+        channel_key(&mut popup, KeyCode::Enter);
+
+        assert_eq!(popup.psk_mode, PskModeKind::Base64);
+        assert_eq!(popup.psk_value, VALID_PSK, "the key survived");
+    }
+
+    #[test]
+    fn esc_closes_the_psk_mode_list_without_choosing() {
+        let mut popup = ChannelPopupState::new();
+        focus_channel_field(&mut popup, "PSK Mode");
+        channel_key(&mut popup, KeyCode::Enter);
+        channel_key(&mut popup, KeyCode::Down);
+
+        channel_key(&mut popup, KeyCode::Esc);
+
+        assert!(popup.list_popup.is_none(), "the list closed");
+        assert_eq!(
+            popup.psk_mode,
+            PskModeKind::Default,
+            "the mode is untouched"
+        );
+    }
+
+    #[test]
+    fn the_psk_mode_list_says_what_each_mode_does() {
+        let mut popup = ChannelPopupState::new();
+        focus_channel_field(&mut popup, "PSK Mode");
+        channel_key(&mut popup, KeyCode::Enter);
+
+        let screen = render_channel(&popup);
+
+        for mode in PskModeKind::ALL {
+            assert!(screen.contains(&mode.to_string()), "{} is listed", mode);
+            assert!(
+                screen.contains(mode.description()),
+                "{} explains itself",
+                mode
+            );
+        }
+    }
+
+    #[test]
+    fn enter_opens_the_position_list_on_the_current_value() {
+        let mut popup = ChannelPopupState::new();
+        popup.position_index = 3;
+        focus_channel_field(&mut popup, "Position");
+
+        channel_key(&mut popup, KeyCode::Enter);
+
+        let list = popup.list_popup.as_ref().expect("the list opened");
+        assert_eq!(list.choice, ListChoice::Position);
+        assert_eq!(list.selected, 3, "opens on the value in use");
+    }
+
+    #[test]
+    fn the_position_list_picks_a_value() {
+        let mut popup = ChannelPopupState::new();
+        focus_channel_field(&mut popup, "Position");
+        channel_key(&mut popup, KeyCode::Enter);
+
+        channel_key(&mut popup, KeyCode::Down);
+        channel_key(&mut popup, KeyCode::Enter);
+
+        assert!(popup.list_popup.is_none(), "the list closed");
+        let (_, channel) = popup.to_channel_info(0).expect("saves");
+        assert_eq!(channel.position_precision, Some(POSITION_OPTIONS[1].1));
+    }
+
+    #[test]
+    fn the_position_list_reaches_the_last_entry() {
+        let mut popup = ChannelPopupState::new();
+        focus_channel_field(&mut popup, "Position");
+        channel_key(&mut popup, KeyCode::Enter);
+
+        channel_key(&mut popup, KeyCode::End);
+        channel_key(&mut popup, KeyCode::Enter);
+
+        let (_, channel) = popup.to_channel_info(0).expect("saves");
+        assert_eq!(channel.position_precision, Some(32), "the precise entry");
+    }
+
+    #[test]
+    fn the_channel_list_selection_stays_in_range() {
+        let mut popup = ChannelPopupState::new();
+        focus_channel_field(&mut popup, "Position");
+        channel_key(&mut popup, KeyCode::Enter);
+
+        for _ in 0..POSITION_OPTIONS.len() + 5 {
+            channel_key(&mut popup, KeyCode::Down);
+        }
+        for _ in 0..POSITION_OPTIONS.len() + 5 {
+            channel_key(&mut popup, KeyCode::Up);
+        }
+
+        let list = popup.list_popup.as_ref().expect("the list is open");
+        assert_eq!(list.selected, 0);
+    }
+
+    #[test]
+    fn the_position_list_reads_well() {
+        let mut popup = ChannelPopupState::new();
+        focus_channel_field(&mut popup, "Position");
+        channel_key(&mut popup, KeyCode::Enter);
+
+        let screen = render_channel(&popup);
+
+        assert!(screen.contains("Disabled"), "the entry names");
+        assert!(screen.contains("no position shared"), "what disabled means");
+        assert!(screen.contains("10 bits"), "the precision in bits");
+    }
+
+    #[test]
+    fn digits_do_not_reach_the_popup_through_the_list() {
+        // Space cycles a field, so it must not act while the list is open.
+        let mut popup = ChannelPopupState::new();
+        focus_channel_field(&mut popup, "PSK Mode");
+        channel_key(&mut popup, KeyCode::Enter);
+
+        channel_key(&mut popup, KeyCode::Char(' '));
+
+        assert!(popup.list_popup.is_some(), "the list is still open");
+        assert_eq!(
+            popup.psk_mode,
+            PskModeKind::Default,
+            "the mode is untouched"
+        );
+    }
+
     #[test]
     fn esc_closes_the_name_box_but_not_the_channel_popup() {
         // Reported: Esc in the name box left the whole channel behind.
@@ -2380,6 +2704,20 @@ mod tests {
 
         assert!(!popup.editing_psk, "the PSK box closed");
         assert_eq!(popup.psk_value, VALID_PSK, "the key survived");
+    }
+
+    #[test]
+    fn esc_closes_the_list_but_not_the_channel_popup() {
+        let mut config = MeshtasticConfig::new();
+        let mut list_state = ListState::default();
+        let mut popup = ChannelPopupState::new();
+        focus_channel_field(&mut popup, "Position");
+        popup.list_popup = Some(ListPopupState::new(ListChoice::Position, 0));
+
+        let popup = press_with_channel(&mut config, &mut list_state, KeyCode::Esc, popup)
+            .expect("the channel popup is still open");
+
+        assert!(popup.list_popup.is_none(), "the list closed");
     }
 
     #[test]
