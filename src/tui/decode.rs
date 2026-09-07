@@ -221,7 +221,7 @@ pub fn draw_decode_mode(f: &mut Frame, state: &mut DecodeDrawState) {
             if has_valid_config {
                 keys.push("[M] Modify");
             }
-            keys.push("[Del] Clear");
+            keys.push("[Shift+Del] Clear all");
             keys.push("[Q] Quit");
         }
         _ => {
@@ -230,7 +230,7 @@ pub fn draw_decode_mode(f: &mut Frame, state: &mut DecodeDrawState) {
             if has_valid_config {
                 keys.push("[M] Modify");
             }
-            keys.push("[Del] Clear");
+            keys.push("[Shift+Del] Clear all");
             keys.push("[Q] Quit");
         }
     }
@@ -242,10 +242,14 @@ pub fn draw_decode_mode(f: &mut Frame, state: &mut DecodeDrawState) {
 }
 
 pub fn handle_decode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut DecodeState) {
-    use ratatui::crossterm::event::KeyCode;
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
     match key.code {
-        KeyCode::Delete => {
+        // Shift+Delete clears the screen, the same key encode mode uses for
+        // it. Delete on its own used to do this, and it was read before the
+        // URL box got a look at the key, so pressing it while typing a URL
+        // threw the URL away instead of deleting a character.
+        KeyCode::Delete if key.modifiers.contains(KeyModifiers::SHIFT) => {
             *state.textarea = TextArea::default();
             *state.config_result = None;
             *state.channels_scroll = 0;
@@ -253,7 +257,11 @@ pub fn handle_decode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut 
             *state.lora_max_scroll = 0;
             state.channels_list_state.select(None);
         }
-        KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Left | KeyCode::Right => {
+        KeyCode::Char(_)
+        | KeyCode::Backspace
+        | KeyCode::Delete
+        | KeyCode::Left
+        | KeyCode::Right => {
             if *state.editing_url {
                 state.textarea.input(key);
             }
@@ -348,9 +356,10 @@ pub fn handle_decode_tab(
 mod tests {
     use super::*;
     use crate::tui::app::DecodeState;
-    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::widgets::ListState;
     use ratatui::{Terminal, backend::TestBackend};
+    use ratatui_textarea::CursorMove;
 
     /// A real node URL, as shared by the Meshtastic app.
     const NODE_URL: &str =
@@ -381,6 +390,112 @@ mod tests {
         handle_decode_keys(KeyEvent::from(KeyCode::Enter), &mut state);
 
         config_result
+    }
+
+    /// A decode-mode state that keeps what the keys leave behind.
+    struct Decoder {
+        textarea: TextArea<'static>,
+        config_result: Option<Result<DecodeResult, String>>,
+        editing_url: bool,
+        channels_list_state: ListState,
+    }
+
+    impl Decoder {
+        /// A decoded URL, sitting on the URL panel with editing finished.
+        fn with(url: &str) -> Self {
+            let mut decoder = Self {
+                textarea: TextArea::new(vec![url.to_string()]),
+                config_result: None,
+                editing_url: true,
+                channels_list_state: ListState::default(),
+            };
+            decoder.press(KeyCode::Enter);
+            decoder
+        }
+
+        fn press(&mut self, code: KeyCode) {
+            self.press_key(KeyEvent::from(code));
+        }
+
+        fn press_shift(&mut self, code: KeyCode) {
+            self.press_key(KeyEvent::new(code, KeyModifiers::SHIFT));
+        }
+
+        fn press_key(&mut self, key: KeyEvent) {
+            let mut active_panel = ActivePanel::Url;
+            let mut channels_scroll = 0;
+            let mut lora_scroll = 0;
+            let mut lora_max_scroll = 0;
+
+            let mut state = DecodeState {
+                active_panel: &mut active_panel,
+                textarea: &mut self.textarea,
+                config_result: &mut self.config_result,
+                editing_url: &mut self.editing_url,
+                channels_scroll: &mut channels_scroll,
+                lora_scroll: &mut lora_scroll,
+                lora_max_scroll: &mut lora_max_scroll,
+                channels_list_state: &mut self.channels_list_state,
+            };
+            handle_decode_keys(key, &mut state);
+        }
+
+        fn url(&self) -> String {
+            self.textarea
+                .lines()
+                .first()
+                .map_or(String::new(), |line| line.to_string())
+        }
+    }
+
+    #[test]
+    fn shift_delete_clears_the_screen() {
+        let mut decoder = Decoder::with(CHANNEL_URL);
+        assert!(decoder.config_result.is_some(), "it decoded first");
+
+        decoder.press_shift(KeyCode::Delete);
+
+        assert_eq!(decoder.url(), "");
+        assert!(decoder.config_result.is_none());
+    }
+
+    #[test]
+    fn delete_no_longer_throws_the_url_away() {
+        // Delete was read before the URL box, so it cleared the screen instead
+        // of deleting a character. Encode mode had the same trap.
+        let mut decoder = Decoder::with(CHANNEL_URL);
+        decoder.press(KeyCode::Enter);
+        assert!(decoder.editing_url, "back in the URL box");
+
+        decoder.press(KeyCode::Delete);
+
+        assert!(!decoder.url().is_empty(), "the URL was not thrown away");
+        assert!(decoder.config_result.is_some(), "nor the decoded result");
+    }
+
+    #[test]
+    fn delete_edits_the_url_while_it_is_being_typed() {
+        let mut decoder = Decoder::with(CHANNEL_URL);
+        decoder.press(KeyCode::Enter);
+        decoder.textarea.move_cursor(CursorMove::Head);
+
+        decoder.press(KeyCode::Delete);
+
+        assert_eq!(
+            decoder.url(),
+            &CHANNEL_URL[1..],
+            "it took the character under the cursor"
+        );
+    }
+
+    #[test]
+    fn delete_does_nothing_outside_the_url_box() {
+        let mut decoder = Decoder::with(CHANNEL_URL);
+
+        decoder.press(KeyCode::Delete);
+
+        assert_eq!(decoder.url(), CHANNEL_URL);
+        assert!(decoder.config_result.is_some());
     }
 
     fn render(result: Option<Result<DecodeResult, String>>) -> String {

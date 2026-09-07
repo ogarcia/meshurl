@@ -25,7 +25,8 @@ adheres to [Semantic Versioning][semver].
 - **`Del` and `Shift+Del` have swapped meanings.** `Del` now takes the
   selected channel, as the key does in any list, and `Shift+Del` clears the
   whole configuration. A finger slipping from `D` onto `Del` used to wipe
-  every channel, the LoRa configuration and the generated URL at once.
+  every channel, the LoRa configuration and the generated URL at once. Decode
+  mode follows the same rule: `Shift+Del` clears the URL and its results.
 - Deleting a channel needs the channel list focused, which is the only place
   the footer offers it. The selection survives a panel switch, so a `D` typed
   anywhere in encode mode used to take a channel with it.
@@ -38,6 +39,8 @@ adheres to [Semantic Versioning][semver].
 
 ### Fixed
 
+- `Del` while typing a URL in decode mode threw the URL away instead of
+  deleting a character: the key was read before the URL box got a look at it.
 - Esc in the channel name box closed the whole popup instead of just the box,
   discarding everything else set on the channel. Both the popup and the
   application handled the key, and the one that ran did not know about the box.

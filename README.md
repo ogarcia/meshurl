@@ -98,7 +98,7 @@ The TUI has two modes:
 | --- | --- |
 | `Enter` | Edit URL / Decode URL |
 | `M` | Migrate decoded URL to Encode mode |
-| `Del` | Clear URL and results |
+| `Shift+Del` | Clear the URL and its results |
 | `↑` / `↓` | Scroll channels or LoRa config |
 
 #### Encode Mode
