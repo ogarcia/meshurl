@@ -868,9 +868,11 @@ fn encode_keys(state: &EncodeDrawState) -> Vec<&'static str> {
         if state.encode_config.channels.len() >= 2 {
             keys.push("[+]/[-] Move");
         }
-    } else if state.active_panel != ActivePanel::Lora
-        && state.encode_config.channels.len() < MAX_CHANNELS
-    {
+    } else if state.active_panel == ActivePanel::Lora {
+        if state.encode_config.lora.is_some() {
+            keys.push("[D/Del] Delete");
+        }
+    } else if state.encode_config.channels.len() < MAX_CHANNELS {
         keys.push("[A] Add");
     }
 
@@ -1360,6 +1362,19 @@ pub fn handle_encode_keys(key: ratatui::crossterm::event::KeyEvent, state: &mut 
                 }
 
                 show_toast(state.toast, "Channel deleted. [U] to undo", true);
+            }
+        }
+        // The same pair on the LoRa panel, acting on what that panel shows.
+        // `[E]` could only replace the parameters, so a configuration that
+        // once had them could never go back to carrying none.
+        KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Delete
+            if *state.active_panel == ActivePanel::Lora =>
+        {
+            if state.encode_config.lora.is_some() {
+                remember_for_undo(state);
+                state.encode_config.lora = None;
+                *state.lora_scroll = 0;
+                show_toast(state.toast, "LoRa parameters deleted. [U] to undo", true);
             }
         }
         KeyCode::Char('e') | KeyCode::Char('E') => {
@@ -2514,6 +2529,63 @@ mod tests {
     }
 
     #[test]
+    fn delete_takes_the_lora_parameters() {
+        // Reported: `[E]` only ever replaced them, so a configuration could
+        // not be taken back to carrying no LoRa parameters at all.
+        let mut config = config_with_channels(2);
+        config.lora = Some(LoRaPopupState::new().to_lora_info());
+        let mut encoder = Encoder::new(config);
+        encoder.active_panel = ActivePanel::Lora;
+
+        encoder.press(KeyCode::Delete);
+
+        assert!(encoder.config.lora.is_none());
+        assert_eq!(encoder.names(), ["ch0", "ch1"], "the channels stayed");
+        assert!(encoder.toast_text().contains("[U] to undo"));
+    }
+
+    #[test]
+    fn d_takes_the_lora_parameters_too() {
+        let mut config = MeshtasticConfig::new();
+        config.lora = Some(LoRaPopupState::new().to_lora_info());
+        let mut encoder = Encoder::new(config);
+        encoder.active_panel = ActivePanel::Lora;
+
+        encoder.press(KeyCode::Char('d'));
+
+        assert!(encoder.config.lora.is_none());
+    }
+
+    #[test]
+    fn undo_puts_back_the_lora_parameters() {
+        let mut config = config_with_channels(1);
+        let mut lora = LoRaPopupState::new().to_lora_info();
+        lora.hop_limit = 5;
+        config.lora = Some(lora);
+        let mut encoder = Encoder::new(config);
+        encoder.active_panel = ActivePanel::Lora;
+        encoder.press(KeyCode::Delete);
+
+        encoder.press(KeyCode::Char('u'));
+
+        let restored = encoder.config.lora.as_ref().expect("the LoRa config");
+        assert_eq!(restored.hop_limit, 5, "the parameters it had, not defaults");
+        assert_eq!(encoder.names(), ["ch0"], "and the channels are untouched");
+    }
+
+    #[test]
+    fn deleting_absent_lora_parameters_does_nothing() {
+        let mut encoder = Encoder::new(config_with_channels(2));
+        encoder.active_panel = ActivePanel::Lora;
+
+        encoder.press(KeyCode::Delete);
+
+        assert_eq!(encoder.names(), ["ch0", "ch1"], "the channels are safe");
+        assert!(encoder.undo.is_none(), "there was nothing to remember");
+        assert_eq!(encoder.toast_text(), "", "and nothing to report");
+    }
+
+    #[test]
     fn r_toggles_what_the_url_does_on_the_device() {
         let mut encoder = Encoder::new(config_with_channels(1));
         assert!(!encoder.config.add_only, "URLs replace by default");
@@ -2655,6 +2727,40 @@ mod tests {
         for (width, height) in [(1, 1), (3, 3), (20, 6), (40, 12)] {
             render_encode_at(&config_with_channels(2), true, width, height);
         }
+    }
+
+    #[test]
+    fn the_footer_offers_the_delete_on_the_lora_panel() {
+        let mut config = config_with_channels(1);
+
+        let keys = keys_on_panel(&config, ActivePanel::Lora);
+        assert!(!keys.contains(&"[D/Del] Delete"), "nothing to delete yet");
+
+        config.lora = Some(LoRaPopupState::new().to_lora_info());
+        let keys = keys_on_panel(&config, ActivePanel::Lora);
+        assert!(keys.contains(&"[D/Del] Delete"), "{:?}", keys);
+        assert!(!keys.contains(&"[A] Add"), "adding is the channels' key");
+    }
+
+    /// The footer hints with a panel focused, taken without a render.
+    fn keys_on_panel(config: &MeshtasticConfig, active_panel: ActivePanel) -> Vec<&'static str> {
+        let mut list_state = ListState::default();
+        let mut lora_max_scroll = 0;
+        let encoded_url = None;
+        let lora_popup = None;
+
+        let state = EncodeDrawState {
+            encode_config: config,
+            encoded_url: &encoded_url,
+            active_panel,
+            encode_channels_state: &mut list_state,
+            lora_popup: &lora_popup,
+            lora_scroll: 0,
+            lora_max_scroll: &mut lora_max_scroll,
+            can_undo: false,
+        };
+
+        encode_keys(&state)
     }
 
     #[test]

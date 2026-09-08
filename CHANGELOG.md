@@ -8,6 +8,15 @@ adheres to [Semantic Versioning][semver].
 [keepachangelog]: https://keepachangelog.com/en/1.1.0/
 [semver]: https://semver.org/spec/v2.0.0.html
 
+## [0.6.1] - unreleased
+
+### Added
+
+- `D` and `Del` delete the LoRa configuration when the LoRa panel is focused,
+  which was the one thing a configuration could not lose: `E` opened the
+  parameters for editing, and every set of them is valid, so there was no way
+  to go back to a URL carrying none. The undo covers it like any other delete.
+
 ## [0.6.0] - 2026-09-07
 
 Mostly about not losing work: the keys that destroy something now do the small

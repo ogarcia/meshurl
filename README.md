@@ -108,7 +108,7 @@ The TUI has two modes:
 | --- | --- |
 | `A` | Add new channel |
 | `Enter` | Edit selected channel |
-| `D` / `Del` | Delete selected channel |
+| `D` / `Del` | Delete the selected channel, or the LoRa configuration |
 | `U` | Undo the last delete or clear |
 | `+` / `-` | Move channel up/down |
 | `E` | Edit LoRa configuration |
@@ -118,9 +118,14 @@ The TUI has two modes:
 | `Shift+Del` | Clear all configuration |
 | `↑` / `↓` | Scroll channels or LoRa config |
 
-`Del` takes the selected channel and `Shift+Del` takes everything, so a
-mistyped key costs one channel rather than the lot. Either way `U` puts back
-what went, one step deep, and the notification says so when it happens.
+`Del` takes what the focused panel holds — the selected channel, or the LoRa
+configuration — and `Shift+Del` takes everything, so a mistyped key costs one
+thing rather than the lot. Either way `U` puts back what went, one step deep,
+and the notification says so when it happens.
+
+Deleting the LoRa configuration is the only way back to a URL that carries
+none: `E` opens the parameters for editing, but every set of them is a valid
+configuration, so it can never leave the URL without one.
 
 The footer at the bottom lists the keys the focused panel accepts, on as many
 lines as they need for the width of the terminal.
