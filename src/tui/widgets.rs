@@ -318,6 +318,20 @@ pub fn node_info_lines(node: &NodeInfo) -> Vec<Line<'_>> {
         ]));
     }
 
+    if node.manually_verified {
+        lines.push(Line::from(vec![
+            Span::styled("Key Verified: ", label),
+            Span::styled("Yes", Style::default().fg(Color::Green)),
+        ]));
+    }
+
+    if node.should_ignore {
+        lines.push(Line::from(vec![
+            Span::styled("Shared to Ignore: ", label),
+            Span::styled("Yes", Style::default().fg(Color::Red)),
+        ]));
+    }
+
     lines
 }
 
@@ -595,6 +609,7 @@ pub fn channel_list_item(index: usize, channel: &ChannelInfo) -> ListItem<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use meshurl::models::UserRole;
     use ratatui::{Terminal, backend::TestBackend};
 
     /// The hints of a busy encode screen, in the order the footer lists them.
@@ -608,6 +623,51 @@ mod tests {
         "[U] Undo",
         "[Q] Quit",
     ];
+
+    /// A contact as a `/v/` URL hands it over, with the flags off.
+    fn a_contact() -> NodeInfo {
+        NodeInfo {
+            num: 1,
+            long_name: "Dom 6734".to_string(),
+            short_name: "6734".to_string(),
+            hw_model: "HELTEC_V3".to_string(),
+            role: UserRole::Client,
+            public_key: None,
+            is_unmessagable: false,
+            should_ignore: false,
+            manually_verified: false,
+        }
+    }
+
+    /// What the panel reads as, lines and all.
+    fn panel_text(lines: &[Line<'_>]) -> String {
+        lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect()
+            })
+            .collect::<Vec<String>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn the_node_panel_reports_the_contact_flags() {
+        let mut node = a_contact();
+
+        let plain = panel_text(&node_info_lines(&node));
+        assert!(!plain.contains("Key Verified"), "{}", plain);
+        assert!(!plain.contains("Ignore"), "{}", plain);
+
+        node.manually_verified = true;
+        node.should_ignore = true;
+
+        let flagged = panel_text(&node_info_lines(&node));
+        assert!(flagged.contains("Key Verified: Yes"), "{}", flagged);
+        assert!(flagged.contains("Shared to Ignore: Yes"), "{}", flagged);
+    }
 
     #[test]
     fn a_wide_terminal_keeps_the_footer_on_one_line() {

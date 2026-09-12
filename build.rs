@@ -11,6 +11,7 @@ const PROTO_FILES: &[&str] = &[
     "meshtastic/channel.proto",
     "meshtastic/config.proto",
     "meshtastic/mesh.proto",
+    "meshurl/shared_contact.proto",
 ];
 
 /// Root the imports resolve against, so `import "meshtastic/x.proto"` works.

@@ -1,7 +1,7 @@
 //! Meshtastic URL decoder module.
 //! Provides functions to decode Meshtastic channel configuration URLs and node info URLs.
 
-use crate::protobufs::{ChannelSet, NodeInfo as PbNodeInfo};
+use crate::protobufs::{ChannelSet, SharedContact};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use prost::Message;
 
@@ -105,10 +105,15 @@ fn try_decode_as_channel(data: &[u8]) -> Result<MeshtasticConfig, DecodeError> {
     Ok(MeshtasticConfig::from_channel_set(&channel_set))
 }
 
+/// A `/v/` URL carries a `SharedContact`, the message a device hands another
+/// when a contact is shared, and not the `NodeInfo` of the node database. The
+/// two agree on the node number and the user, which is why a plain contact
+/// decoded as either, but `should_ignore` and `manually_verified` land on
+/// `NodeInfo`'s position and SNR, and a URL setting them was refused.
 fn try_decode_as_node(data: &[u8]) -> Result<NodeInfo, DecodeError> {
-    let node_pb = PbNodeInfo::decode(data)
-        .map_err(|_| DecodeError::InvalidUrl("Not a valid node info".to_string()))?;
-    Ok(NodeInfo::from_pb(&node_pb))
+    let contact = SharedContact::decode(data)
+        .map_err(|_| DecodeError::InvalidUrl("Not a valid shared contact".to_string()))?;
+    Ok(NodeInfo::from_pb(&contact))
 }
 
 /// What kind of payload a URL announces through its prefix.
@@ -213,6 +218,7 @@ fn decode_base64(hash: &str) -> Result<Vec<u8>, DecodeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protobufs::User;
 
     /// A one channel `ChannelSet`, and a `NodeInfo`, as the payload of a URL.
     const CHANNEL_PAYLOAD: &str = "CgsSAQEoATABOgIIDQ";
@@ -352,6 +358,52 @@ mod tests {
                 assert!(!node.is_unmessagable);
             }
             DecodeResult::Channel(_) => panic!("Expected Node, got Channel"),
+        }
+    }
+
+    #[test]
+    fn a_contact_carrying_its_flags_decodes() {
+        // Reported: a `/v/` URL the firmware had produced was refused. The
+        // flags are the reason, `manually_verified` being field 4, which in
+        // the `NodeInfo` these URLs used to be decoded as is a float.
+        let contact = SharedContact {
+            node_num: 2697684788,
+            user: Some(User {
+                id: "!a0cb6734".to_string(),
+                long_name: "Dom 6734".to_string(),
+                short_name: "6734".to_string(),
+                ..Default::default()
+            }),
+            should_ignore: true,
+            manually_verified: true,
+        };
+        let url = format!(
+            "{}{}",
+            MESHTASTIC_NODE_URL_BASE,
+            URL_SAFE_NO_PAD.encode(contact.encode_to_vec())
+        );
+
+        match decode_url(&url).expect("a shared contact decodes") {
+            DecodeResult::Node(node) => {
+                assert_eq!(node.num, 2697684788);
+                assert_eq!(node.long_name, "Dom 6734");
+                assert!(node.manually_verified, "the key was verified by hand");
+                assert!(node.should_ignore, "and it is shared to be ignored");
+            }
+            DecodeResult::Channel(_) => panic!("expected a node URL"),
+        }
+    }
+
+    #[test]
+    fn a_contact_without_flags_keeps_them_off() {
+        let url = format!("{}{}", MESHTASTIC_NODE_URL_BASE, NODE_PAYLOAD);
+
+        match decode_url(&url).expect("a plain contact decodes") {
+            DecodeResult::Node(node) => {
+                assert!(!node.manually_verified);
+                assert!(!node.should_ignore);
+            }
+            DecodeResult::Channel(_) => panic!("expected a node URL"),
         }
     }
 

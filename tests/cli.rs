@@ -12,6 +12,9 @@ const CHANNEL_URL: &str = "https://meshtastic.org/e/#CgsSAQEoATABOgIIDQoPEgEBGgZ
 const NODE_URL: &str =
     "https://meshtastic.org/v/#CAESJQoLIXRlc3QwMDAwMDESEEdhbGljaWEgQ2FsaWRhZGUaBPCfkJk";
 
+/// A node URL whose contact says its key was verified by hand.
+const VERIFIED_NODE_URL: &str = "https://meshtastic.org/v/#CAESFBINVmVyaWZpZWQgTm9kZRoDVkVSIAE";
+
 /// A channel URL whose LoRa parameters are set by hand rather than by preset.
 const CUSTOM_LORA_URL: &str = "https://meshtastic.org/e/#ChcSAQEaCk5hcnJvd0Zhc3QoATABOgIIDgoPEgECGgRUZXN0KAEwAToAChISAQEaB0dhbGljaWEoATABOgAKExIBARoIQUNvcnXDsWEoATABOgAKDRIBARoETHVnbygBMAEKEhIBARoHT3VyZW5zZSgBMAE6AAoTEgEBGgpQb250ZXZlZHJhKAEwARIdGD4gBygGOANAA0gBUBtYAWgBdURcWUTABgHIBgE";
 
@@ -52,6 +55,16 @@ fn decodes_a_node_url() {
     assert!(out.contains("Node Information"));
     assert!(out.contains("Galicia Calidade"));
     assert!(out.contains("Role:"));
+}
+
+#[test]
+fn decodes_a_node_url_carrying_its_flags() {
+    // The flags sit where `NodeInfo`, which these URLs used to be decoded as,
+    // keeps a position and an SNR, so a URL setting one was refused outright.
+    let out = stdout_of(&["decode", VERIFIED_NODE_URL]);
+
+    assert!(out.contains("Verified Node"));
+    assert!(out.contains("Key Verified: Yes"), "{}", out);
 }
 
 #[test]

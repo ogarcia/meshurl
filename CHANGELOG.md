@@ -8,6 +8,32 @@ adheres to [Semantic Versioning][semver].
 [keepachangelog]: https://keepachangelog.com/en/1.1.0/
 [semver]: https://semver.org/spec/v2.0.0.html
 
+## [0.6.2] - 2026-09-12
+
+### Fixed
+
+- Node (`/v/`) URLs setting either of the flags a shared contact carries were
+  refused with "Not a valid node info". Such a URL holds a `SharedContact`,
+  the message one device hands another when a contact is shared, and meshurl
+  decoded it as the `NodeInfo` of the node database. The two agree on the node
+  number and the user, which is why a plain contact decoded as either, but
+  `should_ignore` and `manually_verified` land on `NodeInfo`'s position and
+  SNR, and the URL was thrown out whole.
+
+### Added
+
+- The decoded node panel and the command line report those two flags: whether
+  the key was verified by hand before the contact was shared, and whether the
+  contact is shared to be ignored rather than added.
+
+### Changed
+
+- Library API: `NodeInfo` gains `should_ignore` and `manually_verified`, and
+  `NodeInfo::from_pb` takes a `SharedContact` instead of a protobuf `NodeInfo`.
+- `SharedContact` is defined in `proto/meshurl/shared_contact.proto` instead
+  of being vendored. Upstream keeps it in `admin.proto`, whose sensor messages
+  take the names prost already gives those of `telemetry.proto`.
+
 ## [0.6.1] - 2026-09-08
 
 ### Added

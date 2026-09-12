@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package meshtastic;
+
+import "meshtastic/mesh.proto";
+
+/*
+ * What a `/v/` URL carries, copied field for field from `SharedContact` in
+ * `meshtastic/admin.proto` of the upstream definitions, v2.8.0.
+ *
+ * That file is not vendored whole because it defines `AS3935_config`,
+ * `DS248X_config` and their siblings, which prost names exactly as it names
+ * `AS3935Config` and `DS248XConfig` from `telemetry.proto`: one package, one
+ * Rust type, defined twice. This is the only message in it meshurl needs.
+ */
+message SharedContact {
+  /*
+   * The node number of the contact
+   */
+  uint32 node_num = 1;
+
+  /*
+   * The User of the contact
+   */
+  User user = 2;
+
+  /*
+   * Add this contact to the blocked / ignored list
+   */
+  bool should_ignore = 3;
+
+  /*
+   * Set the IS_KEY_MANUALLY_VERIFIED bit
+   */
+  bool manually_verified = 4;
+}

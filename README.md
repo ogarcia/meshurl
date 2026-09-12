@@ -9,7 +9,7 @@ A [Meshtastic][meshtastic] channel configuration URL encoder and decoder written
 
 - Decode and encode Meshtastic channel URLs (`/e/`), replacing a device's
   channels or adding to them (`?add=true`)
-- Decode node info URLs (`/v/`) to display device information
+- Decode node info URLs (`/v/`), the contacts devices share with each other
 - Support for multiple channels (up to 8)
 - PSK modes: Default, None, Random, Base64, Passphrase
 - LoRa configuration with all regions and modem presets

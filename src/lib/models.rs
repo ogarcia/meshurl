@@ -217,8 +217,9 @@ pub const MESHTASTIC_CHANNEL_ADD_URL_BASE: &str = "https://meshtastic.org/e/?add
 
 /// Node information decoded from a Meshtastic node info URL.
 ///
-/// This struct contains the information present in `/v/` URLs,
-/// which includes user identity and device information.
+/// This struct contains the information present in `/v/` URLs, which carry a
+/// `SharedContact`: the identity of a node as one device hands it to another,
+/// with the two flags that say what the receiver should make of it.
 /// Note: Position data is not included in node URLs.
 #[derive(Debug, Clone)]
 pub struct NodeInfo {
@@ -236,17 +237,21 @@ pub struct NodeInfo {
     pub public_key: Option<String>,
     /// Whether this node accepts direct messages
     pub is_unmessagable: bool,
+    /// Whether the contact is shared to be ignored, or blocked, rather than added
+    pub should_ignore: bool,
+    /// Whether whoever shared the contact verified its public key by hand
+    pub manually_verified: bool,
 }
 
 impl NodeInfo {
-    /// Creates a `NodeInfo` from a protobuf `NodeInfo` message.
+    /// Creates a `NodeInfo` from a protobuf `SharedContact` message.
     ///
     /// # Arguments
-    /// * `node` - Reference to the protobuf NodeInfo message
+    /// * `contact` - Reference to the protobuf SharedContact message
     ///
     /// # Example
     /// ```
-    /// use meshurl::protobufs::{NodeInfo as PbNodeInfo, User};
+    /// use meshurl::protobufs::{SharedContact, User};
     /// use meshurl::models::NodeInfo;
     ///
     /// // Only the fields this conversion reads are set; the rest keep their
@@ -257,19 +262,19 @@ impl NodeInfo {
     ///     ..Default::default()
     /// };
     ///
-    /// let pb_node = PbNodeInfo {
-    ///     num: 12345,
+    /// let contact = SharedContact {
+    ///     node_num: 12345,
     ///     user: Some(user),
     ///     ..Default::default()
     /// };
     ///
-    /// let node_info = NodeInfo::from_pb(&pb_node);
+    /// let node_info = NodeInfo::from_pb(&contact);
     /// assert_eq!(node_info.num, 12345);
     /// assert_eq!(node_info.long_name, "Test Node");
     /// ```
-    pub fn from_pb(node: &crate::protobufs::NodeInfo) -> Self {
+    pub fn from_pb(contact: &crate::protobufs::SharedContact) -> Self {
         let (long_name, short_name, hw_model, role, public_key, is_unmessagable) =
-            if let Some(ref user) = node.user {
+            if let Some(ref user) = contact.user {
                 let role = UserRole::from(user.role);
                 let public_key = if user.public_key.is_empty() {
                     None
@@ -297,13 +302,15 @@ impl NodeInfo {
             };
 
         Self {
-            num: node.num,
+            num: contact.node_num,
             long_name,
             short_name,
             hw_model,
             role,
             public_key,
             is_unmessagable,
+            should_ignore: contact.should_ignore,
+            manually_verified: contact.manually_verified,
         }
     }
 }

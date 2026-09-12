@@ -62,6 +62,22 @@ pub fn print_node_info(node: &NodeInfo) {
             "Yes".color(Color::Red)
         );
     }
+
+    if node.manually_verified {
+        println!(
+            "    {} {}",
+            "Key Verified:".color(Color::White),
+            "Yes".color(Color::BrightGreen)
+        );
+    }
+
+    if node.should_ignore {
+        println!(
+            "    {} {}",
+            "Shared to Ignore:".color(Color::White),
+            "Yes".color(Color::Red)
+        );
+    }
 }
 
 fn print_channels(channels: &[meshurl::models::ChannelInfo]) {
